@@ -32,11 +32,11 @@ export default function DisposalCenter() {
   const typeParam = searchParams.get('type') || ''
 
   const { workOrders, addWorkOrder, updateWorkOrder } = useWorkOrderStore()
-  const { bills, shops: storeShops } = useShopStore()
+  const { bills, shops: storeShops, updateBill } = useShopStore()
   const { parkingSpots, reminders, addReminder } = useParkingStore()
-  const { adSpaces } = useAdvertisingStore()
-  const { tasks: cleaningTasks } = useCleaningStore()
-  const { incidents } = useSecurityStore()
+  const { adSpaces, updateAdSpace } = useAdvertisingStore()
+  const { tasks: cleaningTasks, updateTask: updateCleaningTask } = useCleaningStore()
+  const { incidents, updateIncident } = useSecurityStore()
 
   const [typeFilter, setTypeFilter] = useState(typeParam)
   const [statusFilter, setStatusFilter] = useState('')
@@ -150,8 +150,65 @@ export default function DisposalCenter() {
     setHandleModal({ open: true, orderId })
   }
 
+  const resolveSourceData = (order: WorkOrder) => {
+    const { sourceId, type } = order
+    const nowStr = new Date().toISOString().slice(0, 16).replace('T', ' ')
+
+    if (type === '逾期账单' && sourceId.startsWith('bill-')) {
+      const billId = sourceId.replace('bill-', '')
+      const bill = bills.find((b) => b.id === billId)
+      if (bill && bill.status !== '已缴') {
+        updateBill(billId, { status: '已缴', paidDate: new Date().toISOString().slice(0, 10), paidAmount: bill.amount })
+      }
+    }
+
+    if (type === '过期广告' && sourceId.startsWith('ad-')) {
+      const adId = sourceId.replace('ad-', '')
+      const ad = adSpaces.find((a) => a.id === adId)
+      if (ad && ad.status !== '空置') {
+        updateAdSpace(adId, { status: '空置' })
+      }
+    }
+
+    if (type === '超时清洁' && sourceId.startsWith('cleaning-')) {
+      const taskId = sourceId.replace('cleaning-', '')
+      const task = cleaningTasks.find((t) => t.id === taskId)
+      if (task && task.status !== '已完成') {
+        updateCleaningTask(taskId, { status: '已完成', completedAt: nowStr })
+      }
+    }
+
+    if (type === '安保事件' && sourceId.startsWith('incident-')) {
+      const incidentId = sourceId.replace('incident-', '')
+      const incident = incidents.find((e) => e.id === incidentId)
+      if (incident && incident.status !== '已处置' && incident.status !== '已归档') {
+        updateIncident(incidentId, { status: '已处置', resolvedAt: nowStr, resolution: '处置中心处理' })
+      }
+    }
+
+    if (type === '超时车辆' && sourceId.startsWith('parking-')) {
+      const spotId = sourceId.replace('parking-', '')
+      const alreadyReminded = reminders.some((r) => r.spotId === spotId)
+      if (!alreadyReminded) {
+        const spot = parkingSpots.find((s) => s.id === spotId)
+        if (spot) {
+          addReminder({
+            id: `PR${Date.now()}`,
+            spotId: spot.id,
+            vehiclePlate: spot.vehiclePlate,
+            reminderTime: nowStr,
+            fee: Math.ceil(((Date.now() - new Date(spot.enterTime).getTime()) / 3600000)) * 5,
+            status: '已发送',
+          })
+        }
+      }
+    }
+  }
+
   const confirmHandle = () => {
     if (!handleForm.handler || !handleForm.result) return
+    const order = workOrders.find((o) => o.id === handleModal.orderId)
+    if (order) resolveSourceData(order)
     updateWorkOrder(handleModal.orderId, {
       status: '已处理',
       handler: handleForm.handler,

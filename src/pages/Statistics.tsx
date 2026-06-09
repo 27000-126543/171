@@ -351,37 +351,38 @@ export default function Statistics() {
     const wb = XLSX.utils.book_new()
 
     const trafficSheet = XLSX.utils.json_to_sheet(
-      floorTrafficSummary
-        .filter(f => !fFloor || f.floor === fFloor)
-        .map(f => ({
-          楼层: f.floor,
-          客流量: f.count,
-          占比: `${f.ratio}%`,
-        }))
+      Object.entries(filteredTrafficMap)
+        .sort(([a], [b]) => {
+          const order = ['1F', '2F', '3F', '4F', '5F', 'B1', 'B2', 'B3']
+          return order.indexOf(a) - order.indexOf(b)
+        })
+        .map(([floor, count]) => {
+          const total = Object.values(filteredTrafficMap).reduce((s, v) => s + v, 0)
+          return {
+            楼层: floor,
+            客流量: count,
+            占比: total > 0 ? `${((count / total) * 100).toFixed(1)}%` : '0%',
+          }
+        })
     )
     XLSX.utils.book_append_sheet(wb, trafficSheet, '客流统计')
 
     const revenueSheet = XLSX.utils.json_to_sheet(
-      monthlyRevenueTrend
-        .filter((_, i) => (i + 1) >= fStartMonth && (i + 1) <= fEndMonth)
-        .map(m => ({
-          月份: m.month,
-          租金收入_万元: m.rent,
-          停车场收入_万元: m.parking,
-          广告收入_万元: m.advertising,
-          其他收入_万元: m.other,
-        }))
+      filteredRevenueTrend.map(m => ({
+        月份: m.month,
+        租金收入_万元: m.本年,
+        去年同期_万元: m.去年,
+      }))
     )
     XLSX.utils.book_append_sheet(wb, revenueSheet, '租金收入')
 
     const energySheet = XLSX.utils.json_to_sheet(
-      filteredEnergyRaw.map(e => ({
+      filteredEnergyByArea.map(e => ({
         区域: e.area,
-        类型: e.type,
-        用量: e.value,
-        单位: e.unit,
-        阈值: e.threshold,
-        超限: e.value > e.threshold ? '是' : '否',
+        用电量: e.electricity,
+        用水量: e.water,
+        用气量: e.gas,
+        合计: e.total,
       }))
     )
     XLSX.utils.book_append_sheet(wb, energySheet, '能耗统计')
@@ -399,7 +400,9 @@ export default function Statistics() {
 
     const exportFloor = activeFloor || '全部楼层'
     const exportCategory = activeCategory || '全部业态'
-    XLSX.writeFile(wb, `月度统计报表_${exportFloor}_${exportCategory}_${activeStartDate || startDate}_${activeEndDate || endDate}.xlsx`)
+    const exportStart = activeStartDate || startDate
+    const exportEnd = activeEndDate || endDate
+    XLSX.writeFile(wb, `月度统计报表_${exportFloor}_${exportCategory}_${exportStart}_${exportEnd}.xlsx`)
   }
 
   return (
