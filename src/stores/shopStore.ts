@@ -16,11 +16,13 @@ interface ShopState {
   addBill: (bill: Bill) => void
   updateBill: (id: string, data: Partial<Bill>) => void
   deleteBill: (id: string) => void
-  generateBillsForShop: (shop: Shop) => Bill[]
+  generateBillsForShop: (shop: Shop, contractVersion?: number) => Bill[]
   deleteBillsByShopId: (shopId: string) => void
   addCollectionRecord: (record: CollectionRecord) => void
   updateCollectionRecord: (id: string, data: Partial<CollectionRecord>) => void
   deleteCollectionRecord: (id: string) => void
+  renewShop: (shopId: string, newLeaseStart: string, newLeaseEnd: string, newRentPrice: number) => void
+  terminateShop: (shopId: string) => void
 }
 
 export const useShopStore = create<ShopState>((set, get) => ({
@@ -43,7 +45,7 @@ export const useShopStore = create<ShopState>((set, get) => ({
     bills: state.bills.map((b) => (b.id === id ? { ...b, ...data } : b)),
   })),
   deleteBill: (id) => set((state) => ({ bills: state.bills.filter((b) => b.id !== id) })),
-  generateBillsForShop: (shop) => {
+  generateBillsForShop: (shop, contractVersion = 1) => {
     if (!shop.tenantName || !shop.leaseStart || !shop.leaseEnd) return []
 
     const { bills: currentBills, contracts: currentContracts } = get()
@@ -99,6 +101,7 @@ export const useShopStore = create<ShopState>((set, get) => ({
         status,
         paidDate,
         paidAmount,
+        contractVersion,
       })
 
       i++
@@ -131,4 +134,112 @@ export const useShopStore = create<ShopState>((set, get) => ({
     collectionRecords: state.collectionRecords.map((r) => (r.id === id ? { ...r, ...data } : r)),
   })),
   deleteCollectionRecord: (id) => set((state) => ({ collectionRecords: state.collectionRecords.filter((r) => r.id !== id) })),
+  renewShop: (shopId, newLeaseStart, newLeaseEnd, newRentPrice) => {
+    const { shops, bills, contracts } = get()
+    const shop = shops.find((s) => s.id === shopId)
+    if (!shop) return
+
+    const maxVersion = bills
+      .filter((b) => b.shopId === shopId)
+      .reduce((max, b) => Math.max(max, b.contractVersion || 1), 0)
+    const nextVersion = maxVersion + 1
+
+    const updatedShop: Shop = {
+      ...shop,
+      leaseStart: newLeaseStart,
+      leaseEnd: newLeaseEnd,
+      rentPrice: newRentPrice,
+      status: '已出租',
+    }
+
+    const renewedShop = { ...updatedShop, rentPrice: newRentPrice }
+
+    const start = new Date(newLeaseStart)
+    const end = new Date(newLeaseEnd)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const existingContract = contracts.find((c) => c.shopId === shopId)
+    const contractId = existingContract?.id || `CT${Date.now()}`
+
+    const newBills: Bill[] = []
+    let current = new Date(start.getFullYear(), start.getMonth(), 1)
+    let i = 0
+    while (current <= end) {
+      const year = current.getFullYear()
+      const month = current.getMonth()
+      const billDate = `${year}-${String(month + 1).padStart(2, '0')}`
+      const dueDate = `${year}-${String(month + 1).padStart(2, '0')}-10`
+      const dueDateObj = new Date(year, month, 10)
+      let status: Bill['status'] = '未缴'
+      if (dueDateObj < today) status = '逾期'
+
+      newBills.push({
+        id: `B${Date.now()}-R${i}`,
+        shopId,
+        contractId,
+        amount: shop.area * newRentPrice,
+        billDate,
+        dueDate,
+        status,
+        paidDate: '',
+        paidAmount: 0,
+        contractVersion: nextVersion,
+      })
+      i++
+      current = new Date(year, month + 1, 1)
+    }
+
+    set((state) => ({
+      shops: state.shops.map((s) => (s.id === shopId ? updatedShop : s)),
+      bills: [...state.bills, ...newBills],
+      contracts: existingContract
+        ? state.contracts.map((c) => (c.id === existingContract.id ? {
+            ...c,
+            endDate: newLeaseEnd,
+            monthlyRent: shop.area * newRentPrice,
+            status: '生效中' as const,
+          } : c))
+        : [...state.contracts, {
+            id: contractId,
+            shopId,
+            tenantName: shop.tenantName,
+            startDate: newLeaseStart,
+            endDate: newLeaseEnd,
+            monthlyRent: shop.area * newRentPrice,
+            deposit: shop.area * newRentPrice * 2,
+            status: '生效中' as const,
+          }],
+    }))
+  },
+  terminateShop: (shopId) => {
+    const { bills, shops } = get()
+    const shop = shops.find((s) => s.id === shopId)
+    if (!shop) return
+
+    const unpaidBills = bills.filter((b) => b.shopId === shopId && b.status !== '已缴')
+
+    set((state) => ({
+      shops: state.shops.map((s) => (s.id === shopId ? {
+        ...s,
+        status: '空置' as const,
+        tenantName: '',
+        tenantPhone: '',
+        leaseStart: '',
+        leaseEnd: '',
+      } : s)),
+      bills: unpaidBills.length > 0
+        ? state.bills.map((b) => (b.shopId === shopId && b.status !== '已缴' ? {
+            ...b,
+            status: '已缴' as const,
+            paidDate: new Date().toISOString().slice(0, 10),
+            paidAmount: b.amount,
+          } : b))
+        : state.bills,
+      contracts: state.contracts.map((c) => (c.shopId === shopId ? {
+        ...c,
+        status: '已终止' as const,
+      } : c)),
+    }))
+  },
 }))

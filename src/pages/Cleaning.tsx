@@ -295,20 +295,31 @@ export default function Cleaning() {
     const assignees = [...new Set(tasks.map((t) => t.assignee))]
     if (assignees.length === 0) return
 
-    const taskCountByAssignee = (name: string) => tasks.filter((t) => t.assignee === name).length
-    const sameFloorAssignees = (floor: string) => assignees.filter((a) => tasks.some((t) => t.assignee === a && t.floor === floor))
-    const sameLevelAssignees = (level: string) => assignees.filter((a) => tasks.some((t) => t.assignee === a && t.level === level))
+    const loadMap = new Map<string, number>()
+    assignees.forEach((a) => {
+      loadMap.set(a, tasks.filter((t) => t.assignee === a && t.status !== '已完成').length)
+    })
 
-    for (const task of pending) {
-      let candidates = sameFloorAssignees(task.floor)
+    const floorAssignees = (floor: string) => assignees.filter((a) => tasks.some((t) => t.assignee === a && t.floor === floor))
+    const levelAssignees = (level: string) => assignees.filter((a) => tasks.some((t) => t.assignee === a && t.level === level))
+
+    const sortedPending = [...pending].sort((a, b) => {
+      const levelOrder: Record<string, number> = { '一级': 0, '二级': 1, '三级': 2 }
+      return (levelOrder[a.level] || 2) - (levelOrder[b.level] || 2)
+    })
+
+    for (const task of sortedPending) {
+      let candidates = floorAssignees(task.floor)
       if (candidates.length === 0) {
-        candidates = sameLevelAssignees(task.level)
+        candidates = levelAssignees(task.level)
       }
       if (candidates.length === 0) {
         candidates = assignees
       }
-      candidates.sort((a, b) => taskCountByAssignee(a) - taskCountByAssignee(b))
-      updateTask(task.id, { assignee: candidates[0] })
+      candidates.sort((a, b) => (loadMap.get(a) || 0) - (loadMap.get(b) || 0))
+      const chosen = candidates[0]
+      updateTask(task.id, { assignee: chosen })
+      loadMap.set(chosen, (loadMap.get(chosen) || 0) + 1)
     }
     setToast({ message: `已重新分配 ${pending.length} 项任务`, type: 'success' })
   }

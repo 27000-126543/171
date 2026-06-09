@@ -187,6 +187,25 @@ export default function Advertising() {
     setDrawerOpen(true)
   }
 
+  const checkAndExpireAd = (adId: string, leaseEnd: string, location: string, type: AdSpace['type'], client: string) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (leaseEnd && new Date(leaseEnd).getTime() < today.getTime() && client) {
+      updateAdSpace(adId, { status: '空置' })
+      const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      addNotification({
+        id: `NTF${Date.now()}-${adId}`,
+        adSpaceId: adId,
+        location,
+        type: '到期下架',
+        message: `广告位 ${location}（${type}）租期已到期，已自动下架`,
+        notifyTime: now,
+        target: '招商部',
+        status: '已发送',
+      })
+    }
+  }
+
   const handleSave = () => {
     const status: AdSpace['status'] = form.client ? '已出租' : '空置'
     if (editingAd) {
@@ -195,6 +214,7 @@ export default function Advertising() {
         leaseStart: form.leaseStart, leaseEnd: form.leaseEnd, client: form.client,
         contactPhone: form.contactPhone, status,
       })
+      checkAndExpireAd(editingAd.id, form.leaseEnd, form.location, form.type, form.client)
       showToast('广告位信息已更新')
     } else {
       const id = `AD${String(adSpaces.length + 1).padStart(3, '0')}`
@@ -203,6 +223,7 @@ export default function Advertising() {
         leaseStart: form.leaseStart, leaseEnd: form.leaseEnd, client: form.client,
         contactPhone: form.contactPhone, status,
       })
+      checkAndExpireAd(id, form.leaseEnd, form.location, form.type, form.client)
       showToast('广告位已新增')
     }
     setDrawerOpen(false)

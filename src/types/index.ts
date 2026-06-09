@@ -33,6 +33,7 @@ export interface Bill {
   status: '已缴' | '未缴' | '逾期' | '部分缴纳'
   paidDate: string
   paidAmount: number
+  contractVersion?: number
 }
 
 export interface CollectionRecord {

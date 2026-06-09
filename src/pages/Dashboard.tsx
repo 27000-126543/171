@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -6,13 +7,18 @@ import {
 import {
   TrendingUp, TrendingDown, AlertTriangle, Flame,
   Droplets, ShieldAlert, Clock, FileText,
-  Receipt, AlertCircle, Zap,
+  Receipt, AlertCircle, Zap, Car, Building2,
+  Sparkles, ArrowRight,
 } from 'lucide-react'
 import { shops } from '@/mock/shops'
 import { kpiSummary, dailyFootTraffic } from '@/mock/statistics'
-import { energyAlarms, energyData } from '@/mock/energy'
-import { incidentEvents } from '@/mock/security'
+import { energyData } from '@/mock/energy'
 import { useShopStore } from '@/stores/shopStore'
+import { useParkingStore } from '@/stores/parkingStore'
+import { useSecurityStore } from '@/stores/securityStore'
+import { useCleaningStore } from '@/stores/cleaningStore'
+import { useAdvertisingStore } from '@/stores/advertisingStore'
+import { useEnergyStore } from '@/stores/energyStore'
 import { useOperationStore } from '@/stores/operationStore'
 
 const SHOP_STATUS_COLORS: Record<string, string> = {
@@ -34,37 +40,119 @@ const ALERT_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   '非法入侵': { color: 'text-red-500', icon: <ShieldAlert className="w-4 h-4" /> },
 }
 
-const PRIORITY_COLORS: Record<string, string> = {
-  high: 'bg-red-500',
-  medium: 'bg-amber-500',
-  low: 'bg-emerald-500',
-}
-
 export default function Dashboard() {
-  const { bills } = useShopStore()
+  const navigate = useNavigate()
+  const { bills, shops: storeShops } = useShopStore()
+  const { parkingSpots } = useParkingStore()
+  const { incidents } = useSecurityStore()
+  const { tasks: cleaningTasks } = useCleaningStore()
+  const { adSpaces } = useAdvertisingStore()
+  const { alarms } = useEnergyStore()
   const { plans } = useOperationStore()
 
+  const overdueBills = useMemo(() => bills.filter((b) => b.status === '逾期'), [bills])
+  const pendingPlans = useMemo(() => plans.filter((p) => p.status === '待审批').length, [plans])
+
+  const overtimeVehicles = useMemo(() => {
+    const now = Date.now()
+    return parkingSpots.filter((s) => {
+      if (s.status !== '占用' || !s.enterTime) return false
+      const hours = (now - new Date(s.enterTime).getTime()) / 3600000
+      return hours > 4
+    })
+  }, [parkingSpots])
+
+  const expiredAds = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayTime = today.getTime()
+    return adSpaces.filter((a) => a.leaseEnd && new Date(a.leaseEnd).getTime() < todayTime && (a.status === '已出租' || a.status === '即将到期'))
+  }, [adSpaces])
+
+  const overdueCleaning = useMemo(() => cleaningTasks.filter((t) => t.status === '超时'), [cleaningTasks])
+
+  const pendingIncidents = useMemo(() => incidents.filter((e) => e.status === '待处置' || e.status === '处置中'), [incidents])
+
+  const exceptionItems = useMemo(() => [
+    {
+      key: 'overdue-bills',
+      label: '逾期账单',
+      count: overdueBills.length,
+      icon: <Receipt className="w-5 h-5" />,
+      color: 'text-red-400',
+      bg: 'bg-red-500/10',
+      border: 'border-red-500/20',
+      route: '/shops',
+      details: overdueBills.slice(0, 3).map((b) => {
+        const shop = storeShops.find((s) => s.id === b.shopId)
+        return `${shop?.number || b.shopId} ¥${b.amount.toLocaleString()}`
+      }),
+    },
+    {
+      key: 'overtime-vehicles',
+      label: '超时车辆',
+      count: overtimeVehicles.length,
+      icon: <Car className="w-5 h-5" />,
+      color: 'text-amber-400',
+      bg: 'bg-amber-500/10',
+      border: 'border-amber-500/20',
+      route: '/parking',
+      details: overtimeVehicles.slice(0, 3).map((s) => `${s.vehiclePlate} (${s.floor})`),
+    },
+    {
+      key: 'expired-ads',
+      label: '过期广告位',
+      count: expiredAds.length,
+      icon: <Building2 className="w-5 h-5" />,
+      color: 'text-orange-400',
+      bg: 'bg-orange-500/10',
+      border: 'border-orange-500/20',
+      route: '/advertising',
+      details: expiredAds.slice(0, 3).map((a) => `${a.location} (${a.type})`),
+    },
+    {
+      key: 'overdue-cleaning',
+      label: '超时清洁任务',
+      count: overdueCleaning.length,
+      icon: <Sparkles className="w-5 h-5" />,
+      color: 'text-purple-400',
+      bg: 'bg-purple-500/10',
+      border: 'border-purple-500/20',
+      route: '/cleaning',
+      details: overdueCleaning.slice(0, 3).map((t) => `${t.area} (${t.floor})`),
+    },
+    {
+      key: 'pending-incidents',
+      label: '待处置安保事件',
+      count: pendingIncidents.length,
+      icon: <ShieldAlert className="w-5 h-5" />,
+      color: 'text-red-500',
+      bg: 'bg-red-500/10',
+      border: 'border-red-500/20',
+      route: '/security',
+      details: pendingIncidents.slice(0, 3).map((e) => `${e.type} ${e.location}`),
+    },
+  ], [overdueBills, overtimeVehicles, expiredAds, overdueCleaning, pendingIncidents, storeShops])
+
+  const totalExceptions = useMemo(() => exceptionItems.reduce((s, e) => s + e.count, 0), [exceptionItems])
+
   const shopStatusData = useMemo(() => {
+    const allShops = storeShops.length > 0 ? storeShops : shops
     const countMap: Record<string, number> = {}
-    shops.forEach((s) => {
+    allShops.forEach((s) => {
       countMap[s.status] = (countMap[s.status] || 0) + 1
     })
     return Object.entries(countMap).map(([name, value]) => ({ name, value }))
-  }, [])
+  }, [storeShops])
 
-  const todoItems = useMemo(() => {
-    const pendingPlans = plans.filter((p) => p.status === '待审批').length
-    const overdueBills = bills.filter((b) => b.status === '逾期').length
-    const pendingIncidents = incidentEvents.filter((e) => e.status === '待处置' || e.status === '处置中').length
-    return [
-      { label: '待审批方案', count: pendingPlans, priority: 'medium' as const, icon: <FileText className="w-4 h-4" /> },
-      { label: '逾期账单', count: overdueBills, priority: 'high' as const, icon: <Receipt className="w-4 h-4" /> },
-      { label: '异常事件待处置', count: pendingIncidents, priority: 'high' as const, icon: <AlertCircle className="w-4 h-4" /> },
-    ]
-  }, [plans, bills])
+  const todoItems = useMemo(() => [
+    { label: '待审批方案', count: pendingPlans, priority: 'medium' as const, icon: <FileText className="w-4 h-4" /> },
+    { label: '逾期账单', count: overdueBills.length, priority: 'high' as const, icon: <Receipt className="w-4 h-4" /> },
+    { label: '异常事件待处置', count: pendingIncidents.length, priority: 'high' as const, icon: <AlertCircle className="w-4 h-4" /> },
+  ], [pendingPlans, overdueBills, pendingIncidents])
 
   const alerts = useMemo(() => {
-    const energy: Array<{ time: string; type: string; desc: string; status: string }> = energyAlarms
+    const energy: Array<{ time: string; type: string; desc: string; status: string }> = alarms
       .filter((a) => a.status === '未处理' || a.status === '处理中')
       .map((a) => ({
         time: a.alarmTime,
@@ -72,7 +160,7 @@ export default function Dashboard() {
         desc: `${a.energyType}能耗超限 ${energyData.find((e) => e.id === a.energyId)?.area || ''} (当前${a.value}/${a.threshold})`,
         status: a.status,
       }))
-    const security: Array<{ time: string; type: string; desc: string; status: string }> = incidentEvents
+    const security: Array<{ time: string; type: string; desc: string; status: string }> = incidents
       .filter((e) => e.status === '待处置' || e.status === '处置中')
       .map((e) => ({
         time: e.eventTime,
@@ -81,52 +169,58 @@ export default function Dashboard() {
         status: e.status,
       }))
     return [...energy, ...security].sort((a, b) => b.time.localeCompare(a.time))
-  }, [])
-
-  const recentAlerts = useMemo(() => {
-    const all = [
-      ...energyAlarms.map((a) => ({ time: a.alarmTime, type: a.energyType, desc: `${a.energyType}能耗超限 - ${energyData.find((e) => e.id === a.energyId)?.area || ''}`, status: a.status })),
-      ...incidentEvents.map((e) => ({ time: e.eventTime, type: e.type, desc: `${e.location} - ${e.description.slice(0, 20)}`, status: e.status })),
-    ]
-    return all.sort((a, b) => b.time.localeCompare(a.time)).slice(0, 8)
-  }, [])
+  }, [alarms, incidents])
 
   const footTraffic7Days = useMemo(() => dailyFootTraffic.slice(-7), [])
 
-  const kpiCards = useMemo(() => [
-    {
-      label: '出租率',
-      value: `${kpiSummary.occupancyRate}%`,
-      change: '+2.1%',
-      up: true,
-      icon: <TrendingUp className="w-5 h-5 text-emerald-400" />,
-      accent: 'from-emerald-500/20 to-emerald-500/5',
-    },
-    {
-      label: '月营收',
-      value: '¥2,185,000',
-      change: '+5.3%',
-      up: true,
-      icon: <TrendingUp className="w-5 h-5 text-amber-400" />,
-      accent: 'from-amber-500/20 to-amber-500/5',
-    },
-    {
-      label: '今日客流',
-      value: '12,580',
-      change: '-1.2%',
-      up: false,
-      icon: <TrendingDown className="w-5 h-5 text-blue-400" />,
-      accent: 'from-blue-500/20 to-blue-500/5',
-    },
-    {
-      label: '告警数',
-      value: '7',
-      change: '+3',
-      up: true,
-      icon: <AlertTriangle className="w-5 h-5 text-red-400" />,
-      accent: 'from-red-500/20 to-red-500/5',
-    },
-  ], [])
+  const kpiCards = useMemo(() => {
+    const rentedCount = storeShops.filter((s) => s.status === '已出租').length
+    const totalShops = storeShops.length || shops.length
+    const occupancyRate = totalShops > 0 ? ((rentedCount / totalShops) * 100).toFixed(1) : kpiSummary.occupancyRate
+    const monthlyRevenue = storeShops.reduce((sum, s) => sum + s.area * s.rentPrice, 0)
+    const revenueDisplay = monthlyRevenue > 0 ? `¥${(monthlyRevenue / 10000).toFixed(1)}万` : '¥218.5万'
+
+    return [
+      {
+        label: '出租率',
+        value: `${occupancyRate}%`,
+        change: '+2.1%',
+        up: true,
+        icon: <TrendingUp className="w-5 h-5 text-emerald-400" />,
+        accent: 'from-emerald-500/20 to-emerald-500/5',
+      },
+      {
+        label: '月营收',
+        value: revenueDisplay,
+        change: '+5.3%',
+        up: true,
+        icon: <TrendingUp className="w-5 h-5 text-amber-400" />,
+        accent: 'from-amber-500/20 to-amber-500/5',
+      },
+      {
+        label: '今日客流',
+        value: '12,580',
+        change: '-1.2%',
+        up: false,
+        icon: <TrendingDown className="w-5 h-5 text-blue-400" />,
+        accent: 'from-blue-500/20 to-blue-500/5',
+      },
+      {
+        label: '异常待处理',
+        value: String(totalExceptions),
+        change: totalExceptions > 0 ? `+${totalExceptions}` : '0',
+        up: totalExceptions > 0,
+        icon: <AlertTriangle className="w-5 h-5 text-red-400" />,
+        accent: 'from-red-500/20 to-red-500/5',
+      },
+    ]
+  }, [storeShops, totalExceptions])
+
+  const PRIORITY_COLORS: Record<string, string> = {
+    high: 'bg-red-500',
+    medium: 'bg-amber-500',
+    low: 'bg-emerald-500',
+  }
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -169,7 +263,7 @@ export default function Dashboard() {
               <div className="font-mono text-3xl font-medium tracking-tight text-white/90 mb-1">
                 {card.value}
               </div>
-              <div className={`flex items-center gap-1 text-xs ${card.up ? (card.label === '告警数' ? 'text-red-400' : 'text-emerald-400') : 'text-red-400'}`}>
+              <div className={`flex items-center gap-1 text-xs ${card.up ? (card.label === '异常待处理' ? 'text-red-400' : 'text-emerald-400') : 'text-red-400'}`}>
                 {card.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                 <span>{card.change}</span>
                 <span className="text-white/30">较上月</span>
@@ -177,6 +271,51 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="card-dark p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-white/60 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+            经营异常汇总
+            {totalExceptions > 0 && (
+              <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-400 animate-pulse">
+                {totalExceptions}
+              </span>
+            )}
+          </h3>
+        </div>
+        <div className="grid grid-cols-5 gap-3">
+          {exceptionItems.map((item) => (
+            <div
+              key={item.key}
+              className={`rounded-xl border ${item.border} ${item.bg} p-4 cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg group`}
+              onClick={() => navigate(item.route)}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className={item.color}>{item.icon}</span>
+                <span className={`font-mono text-2xl font-bold ${item.color}`}>{item.count}</span>
+              </div>
+              <div className="text-sm font-medium text-white/80 mb-2">{item.label}</div>
+              {item.details.length > 0 ? (
+                <div className="space-y-1">
+                  {item.details.map((d, i) => (
+                    <div key={i} className="text-xs text-white/40 truncate">{d}</div>
+                  ))}
+                  {item.count > 3 && (
+                    <div className="text-xs text-white/30">...还有{item.count - 3}项</div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-white/30">暂无异常</div>
+              )}
+              <div className="flex items-center gap-1 mt-3 text-xs text-white/30 group-hover:text-white/50 transition-colors">
+                <span>前往处理</span>
+                <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-12 gap-4">
@@ -228,23 +367,26 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               </div>
               <div className="flex-1 space-y-2">
-                {shopStatusData.map((entry) => (
-                  <div key={entry.name} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full"
-                        style={{ backgroundColor: SHOP_STATUS_COLORS[entry.name] }}
-                      />
-                      <span className="text-white/60">{entry.name}</span>
-                    </span>
-                    <span className="font-mono text-white/80">
-                      {entry.value}
-                      <span className="text-white/30 ml-1">
-                        {((entry.value / shops.length) * 100).toFixed(0)}%
+                {shopStatusData.map((entry) => {
+                  const allShops = storeShops.length > 0 ? storeShops : shops
+                  return (
+                    <div key={entry.name} className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: SHOP_STATUS_COLORS[entry.name] }}
+                        />
+                        <span className="text-white/60">{entry.name}</span>
                       </span>
-                    </span>
-                  </div>
-                ))}
+                      <span className="font-mono text-white/80">
+                        {entry.value}
+                        <span className="text-white/30 ml-1">
+                          {((entry.value / allShops.length) * 100).toFixed(0)}%
+                        </span>
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -300,38 +442,6 @@ export default function Dashboard() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      </div>
-
-      <div className="card-dark p-5">
-        <h3 className="text-sm font-medium text-white/60 mb-4 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-amber-500" />
-          最近告警
-        </h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-          {recentAlerts.map((alert, i) => {
-            const cfg = ALERT_CONFIG[alert.type] || { color: 'text-gray-400', icon: <AlertCircle className="w-4 h-4" /> }
-            const isActive = alert.status === '未处理' || alert.status === '待处置' || alert.status === '处理中' || alert.status === '处置中'
-            return (
-              <div
-                key={i}
-                className={`flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-dark-800/50 transition-colors ${isActive ? 'bg-dark-800/30' : ''}`}
-              >
-                <span className={`shrink-0 ${cfg.color} ${isActive ? 'animate-pulse' : 'opacity-60'}`}>
-                  {cfg.icon}
-                </span>
-                <span className="text-xs text-white/30 font-mono shrink-0">{alert.time.slice(5)}</span>
-                <span className={`text-sm truncate ${isActive ? 'text-white/80' : 'text-white/50'}`}>
-                  {alert.desc}
-                </span>
-                {isActive && (
-                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 shrink-0">
-                    {alert.status}
-                  </span>
-                )}
-              </div>
-            )
-          })}
         </div>
       </div>
 

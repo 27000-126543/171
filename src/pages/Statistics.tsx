@@ -148,22 +148,26 @@ export default function Statistics() {
   const [startDate, setStartDate] = useState('2025-01-01')
   const [endDate, setEndDate] = useState('2025-06-30')
   const [queryActive, setQueryActive] = useState(false)
+  const [activeFloor, setActiveFloor] = useState('')
+  const [activeCategory, setActiveCategory] = useState('')
+  const [activeStartDate, setActiveStartDate] = useState('')
+  const [activeEndDate, setActiveEndDate] = useState('')
   const [floorTab, setFloorTab] = useState('1F')
   const [hoveredShop, setHoveredShop] = useState<string | null>(null)
   const { contracts, bills } = useShopStore()
 
-  const fFloor = queryActive ? selectedFloor : ''
-  const fCategory = queryActive ? selectedCategory : ''
-  const fStartMonth = queryActive && startDate ? new Date(startDate).getMonth() + 1 : 1
-  const fEndMonth = queryActive && endDate ? new Date(endDate).getMonth() + 1 : 12
-  const fStartDate = queryActive ? startDate : ''
-  const fEndDate = queryActive ? endDate : ''
+  const fFloor = activeFloor
+  const fCategory = activeCategory
+  const fStartMonth = activeStartDate ? new Date(activeStartDate).getMonth() + 1 : 1
+  const fEndMonth = activeEndDate ? new Date(activeEndDate).getMonth() + 1 : 12
+  const fStartDate = activeStartDate
+  const fEndDate = activeEndDate
 
   useEffect(() => {
-    if (queryActive && selectedFloor && FLOORS.includes(selectedFloor)) {
-      setFloorTab(selectedFloor)
+    if (activeFloor && FLOORS.includes(activeFloor)) {
+      setFloorTab(activeFloor)
     }
-  }, [queryActive, selectedFloor])
+  }, [activeFloor])
 
   const filteredShops = useMemo(() => {
     let result = shops
@@ -336,6 +340,10 @@ export default function Statistics() {
     : 0
 
   const handleQuery = () => {
+    setActiveFloor(selectedFloor)
+    setActiveCategory(selectedCategory)
+    setActiveStartDate(startDate)
+    setActiveEndDate(endDate)
     setQueryActive(true)
   }
 
