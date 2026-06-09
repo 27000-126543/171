@@ -39,7 +39,7 @@ const emptyForm: FormData = {
 }
 
 export default function Shops() {
-  const { shops, bills, collectionRecords, addShop, updateShop, updateBill, addCollectionRecord } = useShopStore()
+  const { shops, bills, collectionRecords, addShop, updateShop, updateBill, addCollectionRecord, generateBillsForShop, deleteBillsByShopId } = useShopStore()
 
   const [floorFilter, setFloorFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -82,6 +82,14 @@ export default function Shops() {
     return bills.filter((b) => b.shopId === billsShop.id)
   }, [bills, billsShop])
 
+  const billCollectionCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    collectionRecords.forEach((r) => {
+      counts[r.billId] = (counts[r.billId] || 0) + 1
+    })
+    return counts
+  }, [collectionRecords])
+
   const monthlyRent = form.area && form.rentPrice ? Number(form.area) * Number(form.rentPrice) : 0
 
   const showToast = (msg: string) => {
@@ -107,20 +115,33 @@ export default function Shops() {
 
   const handleSave = () => {
     const status: Shop['status'] = form.tenantName ? '已出租' : '空置'
+    const shopData = {
+      number: form.number, area: Number(form.area), rentPrice: Number(form.rentPrice),
+      floor: form.floor, category: form.category, leaseStart: form.leaseStart,
+      leaseEnd: form.leaseEnd, tenantName: form.tenantName, tenantPhone: form.tenantPhone, status,
+    }
     if (editingShop) {
-      updateShop(editingShop.id, {
-        number: form.number, area: Number(form.area), rentPrice: Number(form.rentPrice),
-        floor: form.floor, category: form.category, leaseStart: form.leaseStart,
-        leaseEnd: form.leaseEnd, tenantName: form.tenantName, tenantPhone: form.tenantPhone, status,
-      })
+      updateShop(editingShop.id, shopData)
+      const leaseChanged =
+        editingShop.leaseStart !== form.leaseStart ||
+        editingShop.leaseEnd !== form.leaseEnd ||
+        editingShop.area !== Number(form.area) ||
+        editingShop.rentPrice !== Number(form.rentPrice) ||
+        editingShop.tenantName !== form.tenantName
+      if (form.tenantName && form.leaseStart && form.leaseEnd) {
+        if (leaseChanged) {
+          generateBillsForShop({ ...editingShop, ...shopData })
+        }
+      } else if (!form.tenantName) {
+        deleteBillsByShopId(editingShop.id)
+      }
       showToast('商铺信息已更新')
     } else {
       const id = `S${String(shops.length + 1).padStart(3, '0')}`
-      addShop({
-        id, number: form.number, area: Number(form.area), rentPrice: Number(form.rentPrice),
-        floor: form.floor, category: form.category, leaseStart: form.leaseStart,
-        leaseEnd: form.leaseEnd, tenantName: form.tenantName, tenantPhone: form.tenantPhone, status,
-      })
+      addShop({ id, ...shopData })
+      if (form.tenantName && form.leaseStart && form.leaseEnd) {
+        generateBillsForShop({ id, ...shopData })
+      }
       showToast('商铺已新增')
     }
     setDrawerOpen(false)
@@ -129,6 +150,19 @@ export default function Shops() {
   const openBillsModal = (shop: Shop) => {
     setBillsShop(shop)
     setBillsModalOpen(true)
+    const overdueBills = bills.filter((b) => b.shopId === shop.id && b.status === '逾期')
+    overdueBills.forEach((bill, i) => {
+      const hasRecord = collectionRecords.some((r) => r.billId === bill.id)
+      if (!hasRecord) {
+        addCollectionRecord({
+          id: `CR${Date.now()}-${i}`,
+          billId: bill.id,
+          noticeDate: new Date().toISOString().slice(0, 10),
+          type: '短信',
+          status: '已通知',
+        })
+      }
+    })
   }
 
   const handleConfirmPay = (billId: string) => {
@@ -379,6 +413,9 @@ export default function Shops() {
                         <span className={cn('inline-block rounded-full px-2.5 py-0.5 text-xs font-medium', billStatusStyle[bill.status])}>
                           {bill.status}
                         </span>
+                        {bill.status === '逾期' && billCollectionCounts[bill.id] > 0 && (
+                          <span className="ml-1.5 text-xs text-red-300/60">({billCollectionCounts[bill.id]}条催缴)</span>
+                        )}
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">

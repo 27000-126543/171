@@ -55,7 +55,7 @@ const patrolRoutes = [
 ]
 
 export default function Security() {
-  const { staff, shifts, incidents, updateIncident, updateStaff } = useSecurityStore()
+  const { staff, shifts, incidents, updateIncident, updateStaff, addShifts } = useSecurityStore()
   const today = format(new Date(), 'yyyy-MM-dd')
   const [selectedDate, setSelectedDate] = useState(today)
   const [shiftFilter, setShiftFilter] = useState<SecurityShift['shift'] | '全部'>('全部')
@@ -67,6 +67,7 @@ export default function Security() {
   const [autoScheduling, setAutoScheduling] = useState(false)
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   const [resolutionText, setResolutionText] = useState('')
+  const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' })
 
   useEffect(() => {
     const handler = () => {
@@ -84,14 +85,79 @@ export default function Security() {
 
   const todayShifts = shifts.filter((s) => s.shiftDate === selectedDate)
 
+  const filteredShifts = todayShifts.filter((s) => {
+    if (shiftFilter !== '全部' && s.shift !== shiftFilter) return false
+    if (areaFilter !== '全部' && s.area !== areaFilter) return false
+    return true
+  })
+
   const getStaffRank = (staffName: string) => {
     const s = staff.find((p) => p.name === staffName)
     return s?.rank ?? '队员'
   }
 
+  const showToast = (msg: string) => {
+    setToast({ show: true, msg })
+    setTimeout(() => setToast({ show: false, msg: '' }), 2500)
+  }
+
   const handleAutoSchedule = () => {
     setAutoScheduling(true)
-    setTimeout(() => setAutoScheduling(false), 2000)
+
+    setTimeout(() => {
+      const onDutyStaff = staff.filter((s) => s.status === '在岗')
+      const dateShifts = shifts.filter((s) => s.shiftDate === selectedDate)
+      const riskOrder: Record<string, number> = { '高': 0, '中': 1, '低': 2 }
+      const sortedAreas = [...areaRows].sort((a, b) =>
+        (riskOrder[areaRiskLevels[a]?.level ?? '低'] ?? 2) - (riskOrder[areaRiskLevels[b]?.level ?? '低'] ?? 2)
+      )
+
+      const newShifts: SecurityShift[] = []
+      let shiftCounter = shifts.length
+
+      for (const area of sortedAreas) {
+        for (const col of shiftColumns) {
+          const existing = dateShifts.filter((s) => s.area === area && s.shift === col.key)
+          if (existing.length > 0) continue
+
+          const assignedNamesOnThisShift = new Set(
+            dateShifts.filter((s) => s.shift === col.key).map((s) => s.staffName)
+          )
+          const alreadyNewOnThisShift = new Set(
+            newShifts.filter((s) => s.shift === col.key).map((s) => s.staffName)
+          )
+
+          const available = onDutyStaff.filter((s) =>
+            !assignedNamesOnThisShift.has(s.name) && !alreadyNewOnThisShift.has(s.name)
+          )
+
+          const preferred = available.find((s) => s.area === area || s.area === '全区域')
+          const picked = preferred ?? available[0]
+
+          if (picked) {
+            shiftCounter++
+            newShifts.push({
+              id: `SH${String(shiftCounter).padStart(3, '0')}`,
+              staffId: picked.id,
+              staffName: picked.name,
+              shiftDate: selectedDate,
+              shift: col.key,
+              area,
+              patrolRoute: `${area}巡查路线`,
+            })
+          }
+        }
+      }
+
+      if (newShifts.length > 0) {
+        addShifts(newShifts)
+        showToast(`自动排班完成，已生成 ${newShifts.length} 条新排班`)
+      } else {
+        showToast('所有区域班次已排满，无需新增排班')
+      }
+
+      setAutoScheduling(false)
+    }, 1000)
   }
 
   const handleDispatch = (incident: IncidentEvent) => {
@@ -121,6 +187,11 @@ export default function Security() {
 
   return (
     <div className="space-y-6">
+      {toast.show && (
+        <div className="fixed right-6 top-20 z-[100] animate-slide-up rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-4 py-3 text-sm text-emerald-400 backdrop-blur-sm">
+          <div className="flex items-center gap-2"><CheckCircle2 size={16} />{toast.msg}</div>
+        </div>
+      )}
       {/* Top Bar */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-dark-800/60 px-3 py-2">
@@ -253,32 +324,39 @@ export default function Security() {
               </tr>
             </thead>
             <tbody>
-              {areaRows.map((area) => (
-                <tr key={area} className="group">
-                  <td className="border-b border-white/4 px-4 py-3 font-medium text-white/60">{area}</td>
-                  {shiftColumns.map((col) => {
-                    const assigned = todayShifts.filter((s) => s.area === area && s.shift === col.key)
-                    return (
-                      <td key={col.key} className="border-b border-white/4 px-2 py-2">
-                        {assigned.length > 0 ? assigned.map((s) => {
-                          const rank = getStaffRank(s.staffName)
-                          const rc = rankConfig[rank]
-                          return (
-                            <div key={s.id} className="mb-1 flex items-center justify-center gap-1.5 rounded-lg bg-white/5 px-2 py-1.5 last:mb-0">
-                              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${rc.bg} ${rc.color}`}>
-                                {rank}
-                              </span>
-                              <span className="text-xs text-white/75">{s.staffName}</span>
-                            </div>
-                          )
-                        }) : (
-                          <div className="flex items-center justify-center rounded-lg border border-dashed border-white/8 px-2 py-1.5 text-xs text-white/20">未排班</div>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
+              {areaRows.map((area) => {
+                const isAreaFiltered = areaFilter !== '全部' && area !== areaFilter
+                return (
+                  <tr key={area} className={`group ${isAreaFiltered ? 'opacity-30' : ''}`}>
+                    <td className="border-b border-white/4 px-4 py-3 font-medium text-white/60">{area}</td>
+                    {shiftColumns.map((col) => {
+                      const isShiftFiltered = shiftFilter !== '全部' && col.key !== shiftFilter
+                      const isFiltered = isAreaFiltered || isShiftFiltered
+                      const assigned = filteredShifts.filter((s) => s.area === area && s.shift === col.key)
+                      return (
+                        <td key={col.key} className={`border-b border-white/4 px-2 py-2 ${isFiltered ? 'opacity-30' : ''}`}>
+                          {isFiltered ? (
+                            <div className="flex items-center justify-center rounded-lg border border-dashed border-white/8 px-2 py-1.5 text-xs text-white/20">未排班</div>
+                          ) : assigned.length > 0 ? assigned.map((s) => {
+                            const rank = getStaffRank(s.staffName)
+                            const rc = rankConfig[rank]
+                            return (
+                              <div key={s.id} className="mb-1 flex items-center justify-center gap-1.5 rounded-lg bg-white/5 px-2 py-1.5 last:mb-0">
+                                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${rc.bg} ${rc.color}`}>
+                                  {rank}
+                                </span>
+                                <span className="text-xs text-white/75">{s.staffName}</span>
+                              </div>
+                            )
+                          }) : (
+                            <div className="flex items-center justify-center rounded-lg border border-dashed border-white/8 px-2 py-1.5 text-xs text-white/20">未排班</div>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

@@ -10,6 +10,7 @@ interface SecurityState {
   updateStaff: (id: string, data: Partial<SecurityStaff>) => void
   deleteStaff: (id: string) => void
   addShift: (shift: SecurityShift) => void
+  addShifts: (shifts: SecurityShift[]) => void
   updateShift: (id: string, data: Partial<SecurityShift>) => void
   deleteShift: (id: string) => void
   addIncident: (incident: IncidentEvent) => void
@@ -27,6 +28,7 @@ export const useSecurityStore = create<SecurityState>((set) => ({
   })),
   deleteStaff: (id) => set((state) => ({ staff: state.staff.filter((s) => s.id !== id) })),
   addShift: (shift) => set((state) => ({ shifts: [...state.shifts, shift] })),
+  addShifts: (newShifts) => set((state) => ({ shifts: [...state.shifts, ...newShifts] })),
   updateShift: (id, data) => set((state) => ({
     shifts: state.shifts.map((s) => (s.id === id ? { ...s, ...data } : s)),
   })),

@@ -64,6 +64,15 @@ export interface ParkingSpot {
   isVip: boolean
 }
 
+export interface ParkingReminder {
+  id: string
+  spotId: string
+  vehiclePlate: string
+  reminderTime: string
+  fee: number
+  status: '已发送' | '已读' | '未读'
+}
+
 export interface VipReservation {
   id: string
   parkingId: string
@@ -104,6 +113,14 @@ export interface IncidentEvent {
   description: string
   resolution: string
   resolvedAt: string
+}
+
+export interface CleaningEscalation {
+  id: string
+  taskId: string
+  escalateTime: string
+  reason: string
+  operator: string
 }
 
 export interface CleaningTask {
@@ -151,6 +168,17 @@ export interface AdSpace {
   leaseEnd: string
   client: string
   contactPhone: string
+}
+
+export interface AdNotification {
+  id: string
+  adSpaceId: string
+  location: string
+  type: '到期下架' | '到期提醒' | '新租通知'
+  message: string
+  notifyTime: string
+  target: string
+  status: '已发送' | '已读'
 }
 
 export interface FootTrafficData {

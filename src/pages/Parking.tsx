@@ -13,9 +13,11 @@ import {
   AlertTriangle,
   LogIn,
   LogOut,
+  CheckCircle2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useParkingStore } from '@/stores/parkingStore'
+import type { ParkingReminder } from '@/types'
 
 const FLOORS = ['B1', 'B2', 'B3'] as const
 const TOTAL_SPOTS_PER_FLOOR: Record<string, number> = { B1: 50, B2: 60, B3: 45 }
@@ -125,12 +127,13 @@ interface NewReservationForm {
 }
 
 export default function Parking() {
-  const { parkingSpots, vipReservations, addVipReservation, updateVipReservation } = useParkingStore()
+  const { parkingSpots, vipReservations, addVipReservation, updateVipReservation, reminders, addReminder } = useParkingStore()
   const [activeFloor, setActiveFloor] = useState<string>('B1')
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null)
   const [hoveredSpotId, setHoveredSpotId] = useState<string | null>(null)
   const [showNewReservation, setShowNewReservation] = useState(false)
   const [entryExpanded, setEntryExpanded] = useState(false)
+  const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' })
   const [newRes, setNewRes] = useState<NewReservationForm>({
     applicant: '',
     phone: '',
@@ -181,7 +184,7 @@ export default function Parking() {
       { plate: '沪H·44556', floor: 'B2', time: '2025-06-09 12:30', type: '出场' },
     ]
     return [...entries, ...exits].sort((a, b) => b.time.localeCompare(a.time))
-  }, [parkingSpots])
+  }, [parkingSpots, reminders])
 
   const pendingReservations = vipReservations.filter((r) => r.status === '待审批')
 
@@ -232,8 +235,35 @@ export default function Parking() {
     setShowNewReservation(false)
   }
 
+  function getLatestReminder(spotId: string): ParkingReminder | undefined {
+    return reminders
+      .filter((r) => r.spotId === spotId)
+      .sort((a, b) => b.reminderTime.localeCompare(a.reminderTime))[0]
+  }
+
+  function handleSendReminder(spotId: string, vehiclePlate: string, fee: number) {
+    const now = new Date('2025-06-09T14:00')
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const reminder: ParkingReminder = {
+      id: `PR${Date.now()}`,
+      spotId,
+      vehiclePlate,
+      reminderTime: timeStr,
+      fee,
+      status: '已发送',
+    }
+    addReminder(reminder)
+    setToast({ show: true, msg: `缴费提醒已发送至 ${vehiclePlate}` })
+    setTimeout(() => setToast({ show: false, msg: '' }), 3000)
+  }
+
   return (
     <div className="space-y-6">
+      {toast.show && (
+        <div className="fixed right-6 top-20 z-[100] animate-slide-up rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-4 py-3 text-sm text-emerald-400 backdrop-blur-sm">
+          <div className="flex items-center gap-2"><Check size={16} />{toast.msg}</div>
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15">
           <Car size={22} className="text-amber-500" />
@@ -401,7 +431,9 @@ export default function Parking() {
               {overtimeVehicles.length === 0 && (
                 <p className="py-8 text-center text-sm text-white/30">暂无超时车辆</p>
               )}
-              {overtimeVehicles.map((v) => (
+              {overtimeVehicles.map((v) => {
+                const existingReminder = getLatestReminder(v.id)
+                return (
                 <div key={v.id} className="rounded-lg bg-white/4 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-sm font-semibold text-white">{v.vehiclePlate}</span>
@@ -415,12 +447,26 @@ export default function Parking() {
                     <span className="text-white/40">停放 {v.duration}</span>
                     <span className="font-semibold text-amber-400">¥{v.fee}</span>
                   </div>
-                  <button className="flex w-full items-center justify-center gap-1.5 rounded-md bg-amber-500/15 py-1.5 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-500/25">
-                    <Send size={12} />
-                    发送缴费提醒
+                  {existingReminder && (
+                    <div className="text-[11px] text-emerald-400/70">
+                      已提醒于 {existingReminder.reminderTime.split(' ')[1]}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => handleSendReminder(v.id, v.vehiclePlate, v.fee)}
+                    className={cn(
+                      'flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-medium transition-colors',
+                      existingReminder
+                        ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                        : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                    )}
+                  >
+                    {existingReminder ? <CheckCircle2 size={12} /> : <Send size={12} />}
+                    {existingReminder ? '已提醒（再次发送）' : '发送缴费提醒'}
                   </button>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>
@@ -531,10 +577,15 @@ export default function Parking() {
                   <th className="py-2 text-left font-medium text-white/40">楼层</th>
                   <th className="py-2 text-left font-medium text-white/40">时间</th>
                   <th className="py-2 text-left font-medium text-white/40">类型</th>
+                  <th className="py-2 text-left font-medium text-white/40">提醒状态</th>
                 </tr>
               </thead>
               <tbody>
-                {entryExitRecords.map((rec, i) => (
+                {entryExitRecords.map((rec, i) => {
+                  const matchedReminder = rec.type === '入场'
+                    ? reminders.find((r) => r.vehiclePlate === rec.plate)
+                    : undefined
+                  return (
                   <tr key={i} className="border-b border-white/4">
                     <td className="py-2 font-mono text-white">{rec.plate}</td>
                     <td className="py-2 text-white/70">{rec.floor}</td>
@@ -550,8 +601,18 @@ export default function Parking() {
                         {rec.type}
                       </span>
                     </td>
+                    <td className="py-2 text-xs">
+                      {matchedReminder ? (
+                        <span className="text-emerald-400">
+                          已提醒于 {matchedReminder.reminderTime.split(' ')[1]} · ¥{matchedReminder.fee}
+                        </span>
+                      ) : (
+                        <span className="text-white/20">-</span>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

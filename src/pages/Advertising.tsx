@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Search, Plus, Edit3, X, Save, ChevronDown, Check,
   TrendingUp, CircleDot, AlertCircle, Wrench,
@@ -44,7 +44,7 @@ const emptyForm: FormData = {
 }
 
 export default function Advertising() {
-  const { adSpaces, addAdSpace, updateAdSpace, deleteAdSpace } = useAdvertisingStore()
+  const { adSpaces, addAdSpace, updateAdSpace, deleteAdSpace, notifications, addNotification } = useAdvertisingStore()
 
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -53,6 +53,39 @@ export default function Advertising() {
   const [editingAd, setEditingAd] = useState<AdSpace | null>(null)
   const [form, setForm] = useState<FormData>(emptyForm)
   const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' })
+  const autoExpireProcessed = useRef(false)
+
+  const expiredAdIds = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayTime = today.getTime()
+    return new Set(
+      adSpaces
+        .filter((a) => a.leaseEnd && new Date(a.leaseEnd).getTime() < todayTime)
+        .map((a) => a.id)
+    )
+  }, [adSpaces])
+
+  useEffect(() => {
+    if (autoExpireProcessed.current) return
+    autoExpireProcessed.current = true
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    adSpaces.forEach((ad) => {
+      if (expiredAdIds.has(ad.id) && (ad.status === '已出租' || ad.status === '即将到期')) {
+        updateAdSpace(ad.id, { status: '空置' })
+        addNotification({
+          id: `NTF${Date.now()}-${ad.id}`,
+          adSpaceId: ad.id,
+          location: ad.location,
+          type: '到期下架',
+          message: `广告位 ${ad.location}（${ad.type}）租期已到期，已自动下架`,
+          notifyTime: now,
+          target: '招商部',
+          status: '已发送',
+        })
+      }
+    })
+  }, [adSpaces, expiredAdIds, updateAdSpace, addNotification])
 
   const filtered = useMemo(() => {
     return adSpaces.filter((a) => {
@@ -67,9 +100,9 @@ export default function Advertising() {
   }, [adSpaces, typeFilter, statusFilter, search])
 
   const stats = useMemo(() => {
-    const rented = adSpaces.filter((a) => a.status === '已出租')
-    const vacant = adSpaces.filter((a) => a.status === '空置')
-    const expiring = adSpaces.filter((a) => a.status === '即将到期')
+    const rented = adSpaces.filter((a) => a.status === '已出租' && !expiredAdIds.has(a.id))
+    const vacant = adSpaces.filter((a) => a.status === '空置' || expiredAdIds.has(a.id))
+    const expiring = adSpaces.filter((a) => a.status === '即将到期' && !expiredAdIds.has(a.id))
     const maintenance = adSpaces.filter((a) => a.status === '维护中')
     return {
       rented: { count: rented.length, revenue: rented.reduce((s, a) => s + a.price, 0) },
@@ -77,9 +110,9 @@ export default function Advertising() {
       expiring: { count: expiring.length, revenue: expiring.reduce((s, a) => s + a.price, 0) },
       maintenance: { count: maintenance.length, revenue: maintenance.reduce((s, a) => s + a.price, 0) },
     }
-  }, [adSpaces])
+  }, [adSpaces, expiredAdIds])
 
-  const leasedAds = useMemo(() => adSpaces.filter((a) => a.leaseStart && a.leaseEnd), [adSpaces])
+  const leasedAds = useMemo(() => adSpaces.filter((a) => a.leaseStart && a.leaseEnd && !expiredAdIds.has(a.id)), [adSpaces, expiredAdIds])
 
   const ganttRange = useMemo(() => {
     if (leasedAds.length === 0) return null
@@ -180,8 +213,19 @@ export default function Advertising() {
     showToast('广告位已下架')
   }
 
-  const handleNotify = (location: string) => {
-    showToast(`已通知招商部: ${location} 即将到期`)
+  const handleNotify = (ad: { id: string; location: string; type: AdSpace['type'] }) => {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    addNotification({
+      id: `NTF${Date.now()}-${ad.id}`,
+      adSpaceId: ad.id,
+      location: ad.location,
+      type: '到期提醒',
+      message: `广告位 ${ad.location}（${ad.type}）即将到期，请及时跟进续租`,
+      notifyTime: now,
+      target: '招商部',
+      status: '已发送',
+    })
+    showToast(`已通知招商部: ${ad.location} 即将到期`)
   }
 
   const inputCls = 'w-full rounded-lg border border-white/10 bg-dark-700/50 px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none transition-colors focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20'
@@ -217,6 +261,17 @@ export default function Advertising() {
         <button onClick={openAddDrawer} className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-dark-900 transition-colors hover:bg-amber-400">
           <Plus size={16} />新增广告位
         </button>
+        {notifications.length > 0 && (
+          <div className="relative flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
+            <Bell size={14} className="text-amber-400" />
+            <span>{notifications.length} 条通知</span>
+            {notifications.filter((n) => n.type === '到期下架').length > 0 && (
+              <span className="rounded-full bg-red-500/20 px-1.5 py-0.5 text-[10px] text-red-400">
+                {notifications.filter((n) => n.type === '到期下架').length} 已下架
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-4 gap-4">
@@ -373,9 +428,64 @@ export default function Advertising() {
                     到期日: {ad.leaseEnd} | {ad.daysRemaining < 0 ? `已过期${Math.abs(ad.daysRemaining)}天` : `剩余${ad.daysRemaining}天`}
                   </p>
                 </div>
-                <button onClick={() => handleNotify(ad.location)} className="shrink-0 rounded-lg border border-amber-500/30 px-3 py-1.5 text-xs text-amber-400 transition-colors hover:bg-amber-500/10">
+                <button onClick={() => handleNotify(ad)} className="shrink-0 rounded-lg border border-amber-500/30 px-3 py-1.5 text-xs text-amber-400 transition-colors hover:bg-amber-500/10">
                   通知招商部
                 </button>
+              </div>
+            ))}
+          </div>
+          {notifications.length > 0 && (
+            <div className="mt-4 border-t border-white/8 pt-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Bell size={14} className="text-white/50" />
+                <h4 className="text-xs font-medium text-white/60">通知记录</h4>
+                <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">{notifications.length}</span>
+              </div>
+              <div className="max-h-48 overflow-y-auto space-y-1.5">
+                {notifications.slice(0, 20).map((n) => (
+                  <div key={n.id} className="flex items-start gap-2 rounded-lg bg-white/3 px-3 py-2">
+                    <span className={cn(
+                      'mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium border',
+                      n.type === '到期下架' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
+                      n.type === '到期提醒' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
+                      'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    )}>
+                      {n.type}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-white/70 truncate">{n.message}</p>
+                      <p className="text-[10px] text-white/30">{n.notifyTime} → {n.target} | {n.status}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!expiryAds.length && notifications.length > 0 && (
+        <div className="card-dark p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Bell size={14} className="text-white/50" />
+            <h4 className="text-xs font-medium text-white/60">通知记录</h4>
+            <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">{notifications.length}</span>
+          </div>
+          <div className="max-h-48 overflow-y-auto space-y-1.5">
+            {notifications.slice(0, 20).map((n) => (
+              <div key={n.id} className="flex items-start gap-2 rounded-lg bg-white/3 px-3 py-2">
+                <span className={cn(
+                  'mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium border',
+                  n.type === '到期下架' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
+                  n.type === '到期提醒' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
+                  'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                )}>
+                  {n.type}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-white/70 truncate">{n.message}</p>
+                  <p className="text-[10px] text-white/30">{n.notifyTime} → {n.target} | {n.status}</p>
+                </div>
               </div>
             ))}
           </div>

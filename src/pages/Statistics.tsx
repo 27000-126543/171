@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Line, Legend, LineChart,
@@ -10,7 +10,7 @@ import {
 import * as XLSX from 'xlsx'
 import { shops } from '@/mock/shops'
 import {
-  floorTrafficSummary, categoryTrafficSummary, monthlyRevenueTrend,
+  floorTrafficSummary, monthlyRevenueTrend,
   footTrafficData,
 } from '@/mock/statistics'
 import { energyData } from '@/mock/energy'
@@ -43,6 +43,14 @@ const CATEGORY_COLORS: Record<string, string> = {
   '美容美发': '#EC4899',
   '便利店': '#10B981',
   '烘焙': '#F59E0B',
+}
+
+const CAT_TO_SHOP_CATS: Record<string, string[]> = {
+  '餐饮': ['餐饮'],
+  '零售': ['零售', '珠宝', '化妆品', '服装', '运动', '数码', '便利店', '烘焙'],
+  '娱乐': ['影院', '儿童乐园'],
+  '服务': ['美容美发', '健身'],
+  '教育': ['教育'],
 }
 
 const FLOOR_SHOPS: Record<string, Array<{
@@ -87,18 +95,21 @@ const FLOOR_SHOPS: Record<string, Array<{
   ],
 }
 
-const floorTrafficMap: Record<string, number> = {}
-floorTrafficSummary.forEach((f) => { floorTrafficMap[f.floor] = f.count })
-footTrafficData.forEach((f) => {
-  floorTrafficMap[f.floor] = (floorTrafficMap[f.floor] || 0) + f.count
-})
+const baseRevenueTrendData = monthlyRevenueTrend.map((item, i) => ({
+  month: item.month,
+  monthIndex: i + 1,
+  本年: item.rent,
+  去年: Math.round(item.rent * (0.85 + Math.random() * 0.1)),
+}))
 
-const maxTraffic = Math.max(...Object.values(floorTrafficMap), 1)
-
-function getTrafficIntensity(floor: string): number {
-  const traffic = floorTrafficMap[floor] || 0
-  return traffic / maxTraffic
-}
+const baseComplaintRateData = [
+  { month: '1月', monthIndex: 1, 餐饮: 2.1, 零售: 1.5, 娱乐: 0.8, 服务: 1.2 },
+  { month: '2月', monthIndex: 2, 餐饮: 1.8, 零售: 1.3, 娱乐: 1.0, 服务: 1.6 },
+  { month: '3月', monthIndex: 3, 餐饮: 2.5, 零售: 1.1, 娱乐: 0.6, 服务: 1.0 },
+  { month: '4月', monthIndex: 4, 餐饮: 1.9, 零售: 1.7, 娱乐: 1.2, 服务: 0.9 },
+  { month: '5月', monthIndex: 5, 餐饮: 2.3, 零售: 1.0, 娱乐: 0.9, 服务: 1.4 },
+  { month: '6月', monthIndex: 6, 餐饮: 1.6, 零售: 0.8, 娱乐: 0.7, 服务: 1.1 },
+]
 
 function getHeatmapOverlay(intensity: number): React.CSSProperties {
   if (intensity > 0.7) {
@@ -116,94 +127,13 @@ function getHeatmapOverlay(intensity: number): React.CSSProperties {
   }
 }
 
-function getShopHeatColor(status: string, traffic: number): string {
+function getShopHeatColor(status: string, traffic: number, maxTraffic: number): string {
   const baseColor = STATUS_COLORS[status] || '#6B7280'
-  const intensity = Math.min(traffic / maxTraffic, 1)
+  const intensity = maxTraffic > 0 ? Math.min(traffic / maxTraffic, 1) : 0
   const alpha = 0.3 + intensity * 0.7
   if (status === '空置' || status === '走廊' || status === '通道' || status === '公共设施') return baseColor
   return baseColor + Math.round(alpha * 255).toString(16).padStart(2, '0')
 }
-
-const revenueTrendData = monthlyRevenueTrend.slice(0, 6).map((item, i) => ({
-  month: item.month,
-  本年: item.rent,
-  去年: Math.round(item.rent * (0.85 + Math.random() * 0.1)),
-}))
-
-const energyByArea = [
-  { area: '1F', electricity: 2850, water: 45, gas: 85, total: 2850 + 45 + 85 },
-  { area: '2F', electricity: 2100, water: 38, gas: 0, total: 2100 + 38 },
-  { area: '3F', electricity: 3200, water: 55, gas: 0, total: 3200 + 55 },
-  { area: '4F', electricity: 1800, water: 62, gas: 120, total: 1800 + 62 + 120 },
-  { area: '5F', electricity: 900, water: 28, gas: 0, total: 900 + 28 },
-  { area: 'B1', electricity: 1600, water: 0, gas: 0, total: 1600 },
-]
-
-const complaintRateData = [
-  { month: '1月', 餐饮: 2.1, 零售: 1.5, 娱乐: 0.8, 服务: 1.2 },
-  { month: '2月', 餐饮: 1.8, 零售: 1.3, 娱乐: 1.0, 服务: 1.6 },
-  { month: '3月', 餐饮: 2.5, 零售: 1.1, 娱乐: 0.6, 服务: 1.0 },
-  { month: '4月', 餐饮: 1.9, 零售: 1.7, 娱乐: 1.2, 服务: 0.9 },
-  { month: '5月', 餐饮: 2.3, 零售: 1.0, 娱乐: 0.9, 服务: 1.4 },
-  { month: '6月', 餐饮: 1.6, 零售: 0.8, 娱乐: 0.7, 服务: 1.1 },
-]
-
-const kpiData = [
-  {
-    label: '月度客流总计',
-    value: '28,800',
-    yoy: '+12.5%',
-    mom: '+3.2%',
-    yoyUp: true,
-    momUp: true,
-    icon: <Users className="w-5 h-5 text-amber-400" />,
-    accent: 'from-amber-500/20 to-amber-500/5',
-  },
-  {
-    label: '月度租金收入',
-    value: '¥385.6万',
-    yoy: '+8.3%',
-    mom: '+1.7%',
-    yoyUp: true,
-    momUp: true,
-    icon: <DollarSign className="w-5 h-5 text-emerald-400" />,
-    accent: 'from-emerald-500/20 to-emerald-500/5',
-  },
-  {
-    label: '月度能耗费用',
-    value: '¥42.8万',
-    yoy: '+5.1%',
-    mom: '-2.4%',
-    yoyUp: true,
-    momUp: false,
-    icon: <Zap className="w-5 h-5 text-blue-400" />,
-    accent: 'from-blue-500/20 to-blue-500/5',
-  },
-  {
-    label: '月度投诉率',
-    value: '1.35%',
-    yoy: '-0.8%',
-    mom: '+0.2%',
-    yoyUp: false,
-    momUp: true,
-    icon: <AlertTriangle className="w-5 h-5 text-red-400" />,
-    accent: 'from-red-500/20 to-red-500/5',
-  },
-]
-
-const floorCategoryData = FLOORS.map((floor) => {
-  const row: Record<string, string | number> = { floor }
-  const floorShops = shops.filter((s) => s.floor === floor)
-  CATEGORIES.forEach((cat) => {
-    const catShops = floorShops.filter(
-      (s) => s.category === cat || (cat === '娱乐' && ['影院', '儿童乐园'].includes(s.category)) || (cat === '服务' && ['美容美发', '健身'].includes(s.category)) || (cat === '教育' && s.category === '教育')
-    )
-    const area = catShops.reduce((sum, s) => sum + s.area, 0)
-    const trafficRatio = floorTrafficMap[floor] ? (area / (floorShops.reduce((s, sh) => s + sh.area, 1) || 1)) * floorTrafficMap[floor] : 0
-    row[cat] = Math.round(trafficRatio)
-  })
-  return row
-})
 
 const tooltipStyle = {
   backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -217,9 +147,180 @@ export default function Statistics() {
   const [selectedCategory, setSelectedCategory] = useState('')
   const [startDate, setStartDate] = useState('2025-01-01')
   const [endDate, setEndDate] = useState('2025-06-30')
+  const [queryActive, setQueryActive] = useState(false)
   const [floorTab, setFloorTab] = useState('1F')
   const [hoveredShop, setHoveredShop] = useState<string | null>(null)
   const { contracts, bills } = useShopStore()
+
+  const fFloor = queryActive ? selectedFloor : ''
+  const fCategory = queryActive ? selectedCategory : ''
+  const fStartMonth = queryActive && startDate ? new Date(startDate).getMonth() + 1 : 1
+  const fEndMonth = queryActive && endDate ? new Date(endDate).getMonth() + 1 : 12
+  const fStartDate = queryActive ? startDate : ''
+  const fEndDate = queryActive ? endDate : ''
+
+  useEffect(() => {
+    if (queryActive && selectedFloor && FLOORS.includes(selectedFloor)) {
+      setFloorTab(selectedFloor)
+    }
+  }, [queryActive, selectedFloor])
+
+  const filteredShops = useMemo(() => {
+    let result = shops
+    if (fFloor) result = result.filter(s => s.floor === fFloor)
+    if (fCategory) {
+      const cats = CAT_TO_SHOP_CATS[fCategory] || [fCategory]
+      result = result.filter(s => cats.includes(s.category))
+    }
+    return result
+  }, [fFloor, fCategory])
+
+  const filteredTraffic = useMemo(() => {
+    let result = footTrafficData
+    if (fFloor) result = result.filter(f => f.floor === fFloor)
+    if (fStartDate && fEndDate) {
+      result = result.filter(f => f.date >= fStartDate && f.date <= fEndDate)
+    }
+    return result
+  }, [fFloor, fStartDate, fEndDate])
+
+  const filteredTrafficMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    const summaryFloors = fFloor
+      ? floorTrafficSummary.filter(f => f.floor === fFloor)
+      : floorTrafficSummary
+    summaryFloors.forEach(f => { map[f.floor] = f.count })
+    filteredTraffic.forEach(f => {
+      map[f.floor] = (map[f.floor] || 0) + f.count
+    })
+    return map
+  }, [fFloor, filteredTraffic])
+
+  const filteredMaxTraffic = useMemo(() => {
+    const values = Object.values(filteredTrafficMap)
+    return values.length > 0 ? Math.max(...values) : 1
+  }, [filteredTrafficMap])
+
+  const filteredRevenueTrend = useMemo(() => {
+    return baseRevenueTrendData.filter(
+      item => item.monthIndex >= fStartMonth && item.monthIndex <= fEndMonth
+    )
+  }, [fStartMonth, fEndMonth])
+
+  const filteredEnergyRaw = useMemo(() => {
+    let result = energyData
+    if (fFloor) {
+      result = result.filter(e => e.area === fFloor || e.area.startsWith(fFloor))
+    }
+    if (fStartDate && fEndDate) {
+      result = result.filter(e => {
+        const date = e.timestamp.split(' ')[0]
+        return date >= fStartDate && date <= fEndDate
+      })
+    }
+    return result
+  }, [fFloor, fStartDate, fEndDate])
+
+  const filteredEnergyByArea = useMemo(() => {
+    const areaMap: Record<string, { electricity: number; water: number; gas: number }> = {}
+    filteredEnergyRaw.forEach(e => {
+      const baseArea = e.area.replace(/餐饮$/, '')
+      if (!areaMap[baseArea]) areaMap[baseArea] = { electricity: 0, water: 0, gas: 0 }
+      if (e.type === '电') areaMap[baseArea].electricity += e.value
+      else if (e.type === '水') areaMap[baseArea].water += e.value
+      else if (e.type === '气') areaMap[baseArea].gas += e.value
+    })
+    const areaOrder = ['1F', '2F', '3F', '4F', '5F', 'B1', 'B2', 'B3']
+    return Object.entries(areaMap)
+      .map(([area, data]) => ({
+        area,
+        electricity: data.electricity,
+        water: data.water,
+        gas: data.gas,
+        total: data.electricity + data.water + data.gas,
+      }))
+      .sort((a, b) => areaOrder.indexOf(a.area) - areaOrder.indexOf(b.area))
+  }, [filteredEnergyRaw])
+
+  const filteredComplaints = useMemo(() => {
+    return baseComplaintRateData.filter(
+      item => item.monthIndex >= fStartMonth && item.monthIndex <= fEndMonth
+    )
+  }, [fStartMonth, fEndMonth])
+
+  const filteredFloorCategoryData = useMemo(() => {
+    const floors = fFloor ? [fFloor] : FLOORS
+    return floors.map((floor) => {
+      const row: Record<string, string | number> = { floor }
+      const floorShops = filteredShops.filter(s => s.floor === floor)
+      CATEGORIES.forEach((cat) => {
+        const cats = CAT_TO_SHOP_CATS[cat] || [cat]
+        const catShops = floorShops.filter(s => cats.includes(s.category))
+        const area = catShops.reduce((sum, s) => sum + s.area, 0)
+        const totalArea = floorShops.reduce((s, sh) => s + sh.area, 1)
+        const trafficRatio = filteredTrafficMap[floor]
+          ? (area / totalArea) * filteredTrafficMap[floor]
+          : 0
+        row[cat] = Math.round(trafficRatio)
+      })
+      return row
+    })
+  }, [fFloor, filteredShops, filteredTrafficMap])
+
+  const kpiCards = useMemo(() => {
+    const totalTraffic = Object.values(filteredTrafficMap).reduce((sum, v) => sum + v, 0)
+    const trafficDisplay = totalTraffic >= 10000
+      ? `${(totalTraffic / 10000).toFixed(1)}万`
+      : totalTraffic.toLocaleString()
+
+    const totalRent = filteredShops.reduce((sum, s) => sum + s.area * s.rentPrice, 0) / 10000
+    const rentDisplay = `¥${totalRent.toFixed(1)}万`
+
+    const energyCost = filteredEnergyRaw.reduce((sum, e) => {
+      if (e.type === '电') return sum + e.value * 0.8
+      if (e.type === '水') return sum + e.value * 5
+      if (e.type === '气') return sum + e.value * 3
+      return sum
+    }, 0) / 10000
+    const energyDisplay = `¥${energyCost.toFixed(1)}万`
+
+    const allRates = filteredComplaints.flatMap(c => [c.餐饮, c.零售, c.娱乐, c.服务])
+    const avgRate = allRates.length > 0
+      ? allRates.reduce((a, b) => a + b, 0) / allRates.length
+      : 0
+    const complaintDisplay = `${avgRate.toFixed(2)}%`
+
+    return [
+      {
+        label: '月度客流总计',
+        value: trafficDisplay,
+        yoy: '+12.5%', mom: '+3.2%', yoyUp: true, momUp: true,
+        icon: <Users className="w-5 h-5 text-amber-400" />,
+        accent: 'from-amber-500/20 to-amber-500/5',
+      },
+      {
+        label: '月度租金收入',
+        value: rentDisplay,
+        yoy: '+8.3%', mom: '+1.7%', yoyUp: true, momUp: true,
+        icon: <DollarSign className="w-5 h-5 text-emerald-400" />,
+        accent: 'from-emerald-500/20 to-emerald-500/5',
+      },
+      {
+        label: '月度能耗费用',
+        value: energyDisplay,
+        yoy: '+5.1%', mom: '-2.4%', yoyUp: true, momUp: false,
+        icon: <Zap className="w-5 h-5 text-blue-400" />,
+        accent: 'from-blue-500/20 to-blue-500/5',
+      },
+      {
+        label: '月度投诉率',
+        value: complaintDisplay,
+        yoy: '-0.8%', mom: '+0.2%', yoyUp: false, momUp: true,
+        icon: <AlertTriangle className="w-5 h-5 text-red-400" />,
+        accent: 'from-red-500/20 to-red-500/5',
+      },
+    ]
+  }, [filteredTrafficMap, filteredShops, filteredEnergyRaw, filteredComplaints])
 
   const currentFloorShops = FLOOR_SHOPS[floorTab] || []
   const gridRows = useMemo(() => {
@@ -230,31 +331,43 @@ export default function Statistics() {
     return maxRow
   }, [currentFloorShops])
 
+  const floorIntensity = filteredMaxTraffic > 0
+    ? (filteredTrafficMap[floorTab] || 0) / filteredMaxTraffic
+    : 0
+
+  const handleQuery = () => {
+    setQueryActive(true)
+  }
+
   const handleExport = () => {
     const wb = XLSX.utils.book_new()
 
     const trafficSheet = XLSX.utils.json_to_sheet(
-      floorTrafficSummary.map((f) => ({
-        楼层: f.floor,
-        客流量: f.count,
-        占比: `${f.ratio}%`,
-      }))
+      floorTrafficSummary
+        .filter(f => !fFloor || f.floor === fFloor)
+        .map(f => ({
+          楼层: f.floor,
+          客流量: f.count,
+          占比: `${f.ratio}%`,
+        }))
     )
     XLSX.utils.book_append_sheet(wb, trafficSheet, '客流统计')
 
     const revenueSheet = XLSX.utils.json_to_sheet(
-      monthlyRevenueTrend.map((m) => ({
-        月份: m.month,
-        租金收入_万元: m.rent,
-        停车场收入_万元: m.parking,
-        广告收入_万元: m.advertising,
-        其他收入_万元: m.other,
-      }))
+      monthlyRevenueTrend
+        .filter((_, i) => (i + 1) >= fStartMonth && (i + 1) <= fEndMonth)
+        .map(m => ({
+          月份: m.month,
+          租金收入_万元: m.rent,
+          停车场收入_万元: m.parking,
+          广告收入_万元: m.advertising,
+          其他收入_万元: m.other,
+        }))
     )
     XLSX.utils.book_append_sheet(wb, revenueSheet, '租金收入')
 
     const energySheet = XLSX.utils.json_to_sheet(
-      energyData.map((e) => ({
+      filteredEnergyRaw.map(e => ({
         区域: e.area,
         类型: e.type,
         用量: e.value,
@@ -266,7 +379,7 @@ export default function Statistics() {
     XLSX.utils.book_append_sheet(wb, energySheet, '能耗统计')
 
     const complaintSheet = XLSX.utils.json_to_sheet(
-      complaintRateData.map((c) => ({
+      filteredComplaints.map(c => ({
         月份: c.month,
         餐饮投诉率: c.餐饮,
         零售投诉率: c.零售,
@@ -278,8 +391,6 @@ export default function Statistics() {
 
     XLSX.writeFile(wb, `月度统计报表_${startDate}_${endDate}.xlsx`)
   }
-
-  const floorIntensity = getTrafficIntensity(floorTab)
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -318,7 +429,10 @@ export default function Statistics() {
             onChange={(e) => setEndDate(e.target.value)}
             className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 focus:outline-none focus:border-amber-500/50"
           />
-          <button className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-dark-900 font-medium px-4 py-2 rounded-lg text-sm transition-colors">
+          <button
+            onClick={handleQuery}
+            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-dark-900 font-medium px-4 py-2 rounded-lg text-sm transition-colors"
+          >
             <Search className="w-4 h-4" />
             查询
           </button>
@@ -333,7 +447,7 @@ export default function Statistics() {
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        {kpiData.map((card) => (
+        {kpiCards.map((card) => (
           <div
             key={card.label}
             className="card-dark p-5 relative overflow-hidden group hover:border-amber-500/30 transition-colors"
@@ -374,7 +488,7 @@ export default function Statistics() {
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={floorCategoryData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <BarChart data={filteredFloorCategoryData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="floor" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} />
                 <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} />
@@ -395,7 +509,7 @@ export default function Statistics() {
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={revenueTrendData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <ComposedChart data={filteredRevenueTrend} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="month" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} />
                 <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickFormatter={(v: number) => `${v}万`} />
@@ -417,7 +531,7 @@ export default function Statistics() {
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={energyByArea} layout="vertical" margin={{ top: 5, right: 20, left: 30, bottom: 5 }}>
+              <BarChart data={filteredEnergyByArea} layout="vertical" margin={{ top: 5, right: 20, left: 30, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis type="number" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} />
                 <YAxis dataKey="area" type="category" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} />
@@ -438,7 +552,7 @@ export default function Statistics() {
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={complaintRateData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <LineChart data={filteredComplaints} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="month" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} />
                 <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.4)' }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickFormatter={(v: number) => `${v}%`} />
@@ -490,9 +604,9 @@ export default function Statistics() {
           >
             {currentFloorShops.map((shop) => {
               const isSpecial = ['走廊', '通道', '公共设施'].includes(shop.status)
-              const traffic = floorTrafficMap[floorTab] || 0
+              const traffic = filteredTrafficMap[floorTab] || 0
               const shopTraffic = isSpecial ? 0 : Math.round((traffic / (currentFloorShops.filter((s) => !['走廊', '通道', '公共设施'].includes(s.status)).length || 1)) * (0.5 + Math.random() * 1))
-              const heatColor = isSpecial ? 'transparent' : getShopHeatColor(shop.status, shopTraffic)
+              const heatColor = isSpecial ? 'transparent' : getShopHeatColor(shop.status, shopTraffic, filteredMaxTraffic)
               const isHovered = hoveredShop === shop.id
 
               return (

@@ -21,7 +21,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useCleaningStore } from '@/stores/cleaningStore'
 import { cleaningLevelConfig } from '@/mock/cleaning'
-import type { CleaningTask } from '@/types'
+import type { CleaningTask, CleaningEscalation } from '@/types'
 
 const FLOORS = ['1F', '2F', '3F', '4F', '5F', 'B1'] as const
 const LEVELS = ['一级', '二级', '三级'] as const
@@ -76,8 +76,8 @@ const cleaningChecklists: Record<string, string[]> = {
   '三级': ['地面清扫', '垃圾收集', '设备表面清洁', '通风口检查', '消防设施检查'],
 }
 
-function getStatusHistory(task: CleaningTask) {
-  const history = [{ time: `${task.taskDate} 08:00`, status: '待执行', operator: '系统' }]
+function getStatusHistory(task: CleaningTask, escalations: CleaningEscalation[]) {
+  const history: { time: string; status: string; operator: string; reason?: string }[] = [{ time: `${task.taskDate} 08:00`, status: '待执行', operator: '系统' }]
   if (task.status === '进行中' || task.status === '已完成' || task.status === '超时') {
     const min = String(Math.floor(Math.random() * 30)).padStart(2, '0')
     history.push({ time: `${task.taskDate} 08:${min}`, status: '进行中', operator: task.assignee })
@@ -89,6 +89,16 @@ function getStatusHistory(task: CleaningTask) {
     const min = String(Math.floor(Math.random() * 20) + 10).padStart(2, '0')
     history.push({ time: `${task.taskDate} 08:${min}`, status: '超时', operator: '系统' })
   }
+  const taskEscalations = escalations.filter((e) => e.taskId === task.id)
+  for (const esc of taskEscalations) {
+    history.push({
+      time: esc.escalateTime,
+      status: '升级通知主管',
+      operator: esc.operator,
+      reason: esc.reason,
+    })
+  }
+  history.sort((a, b) => a.time.localeCompare(b.time))
   return history
 }
 
@@ -108,14 +118,15 @@ const statusStyle: Record<string, string> = {
 
 interface TaskDetailModalProps {
   task: CleaningTask
+  escalations: CleaningEscalation[]
   onClose: () => void
   onEscalate: (task: CleaningTask) => void
 }
 
-function TaskDetailModal({ task, onClose, onEscalate }: TaskDetailModalProps) {
+function TaskDetailModal({ task, escalations, onClose, onEscalate }: TaskDetailModalProps) {
   const description = areaDescriptions[task.area] || '常规清洁区域'
   const checklist = cleaningChecklists[task.level] || []
-  const history = getStatusHistory(task)
+  const history = getStatusHistory(task, escalations)
   const remaining = getRemainingTime(task)
   const lvl = levelBadge[task.level]
 
@@ -211,8 +222,13 @@ function TaskDetailModal({ task, onClose, onEscalate }: TaskDetailModalProps) {
               {history.map((h, i) => (
                 <div key={i} className="flex items-center gap-3 text-xs">
                   <span className="text-white/30 font-mono">{h.time}</span>
-                  <span className={cn('rounded px-1.5 py-0.5', statusStyle[h.status])}>{h.status}</span>
+                  {h.status === '升级通知主管' ? (
+                    <span className="rounded px-1.5 py-0.5 bg-red-500/15 text-red-400">升级通知主管</span>
+                  ) : (
+                    <span className={cn('rounded px-1.5 py-0.5', statusStyle[h.status])}>{h.status}</span>
+                  )}
                   <span className="text-white/40">{h.operator}</span>
+                  {h.reason && <span className="text-red-400/70">（{h.reason}）</span>}
                 </div>
               ))}
             </div>
@@ -234,7 +250,7 @@ function TaskDetailModal({ task, onClose, onEscalate }: TaskDetailModalProps) {
 }
 
 export default function Cleaning() {
-  const { tasks, updateTask } = useCleaningStore()
+  const { tasks, escalations, updateTask, addEscalation } = useCleaningStore()
   const [selectedDate, setSelectedDate] = useState('2025-06-09')
   const [floorFilter, setFloorFilter] = useState('全部')
   const [levelFilter, setLevelFilter] = useState('全部')
@@ -272,10 +288,44 @@ export default function Cleaning() {
 
   function handleAutoAssign() {
     const pending = tasks.filter((t) => t.status === '待执行')
-    setToast({ message: `已自动分配 ${pending.length} 项待执行任务`, type: 'success' })
+    if (pending.length === 0) {
+      setToast({ message: '没有待执行的任务需要分配', type: 'success' })
+      return
+    }
+    const assignees = [...new Set(tasks.map((t) => t.assignee))]
+    if (assignees.length === 0) return
+
+    const taskCountByAssignee = (name: string) => tasks.filter((t) => t.assignee === name).length
+    const sameFloorAssignees = (floor: string) => assignees.filter((a) => tasks.some((t) => t.assignee === a && t.floor === floor))
+    const sameLevelAssignees = (level: string) => assignees.filter((a) => tasks.some((t) => t.assignee === a && t.level === level))
+
+    for (const task of pending) {
+      let candidates = sameFloorAssignees(task.floor)
+      if (candidates.length === 0) {
+        candidates = sameLevelAssignees(task.level)
+      }
+      if (candidates.length === 0) {
+        candidates = assignees
+      }
+      candidates.sort((a, b) => taskCountByAssignee(a) - taskCountByAssignee(b))
+      updateTask(task.id, { assignee: candidates[0] })
+    }
+    setToast({ message: `已重新分配 ${pending.length} 项任务`, type: 'success' })
   }
 
   function handleEscalate(task: CleaningTask) {
+    const now = new Date()
+    const escalateTime = `${task.taskDate} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    addEscalation({
+      id: `esc-${Date.now()}`,
+      taskId: task.id,
+      escalateTime,
+      reason: '超时未完成',
+      operator: '系统',
+    })
+    if (task.status === '进行中') {
+      updateTask(task.id, { status: '超时' })
+    }
     setToast({ message: `已通知主管：${task.area} 清洁任务超时，需紧急处理`, type: 'warning' })
   }
 
@@ -554,6 +604,7 @@ export default function Cleaning() {
       {selectedTask && (
         <TaskDetailModal
           task={selectedTask}
+          escalations={escalations}
           onClose={() => setSelectedTask(null)}
           onEscalate={handleEscalate}
         />
