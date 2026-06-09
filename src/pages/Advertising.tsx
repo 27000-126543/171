@@ -44,7 +44,7 @@ const emptyForm: FormData = {
 }
 
 export default function Advertising() {
-  const { adSpaces, addAdSpace, updateAdSpace, deleteAdSpace, notifications, addNotification } = useAdvertisingStore()
+  const { adSpaces, addAdSpace, updateAdSpace, deleteAdSpace, notifications, addNotification, markNotificationRead, markAllNotificationsRead } = useAdvertisingStore()
 
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -53,6 +53,7 @@ export default function Advertising() {
   const [editingAd, setEditingAd] = useState<AdSpace | null>(null)
   const [form, setForm] = useState<FormData>(emptyForm)
   const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' })
+  const [notifPanelOpen, setNotifPanelOpen] = useState(false)
   const autoExpireProcessed = useRef(false)
 
   const expiredAdIds = useMemo(() => {
@@ -70,22 +71,25 @@ export default function Advertising() {
     if (autoExpireProcessed.current) return
     autoExpireProcessed.current = true
     const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const existingNotifAdIds = new Set(notifications.filter((n) => n.type === '到期下架').map((n) => n.adSpaceId))
     adSpaces.forEach((ad) => {
       if (expiredAdIds.has(ad.id) && (ad.status === '已出租' || ad.status === '即将到期')) {
         updateAdSpace(ad.id, { status: '空置' })
-        addNotification({
-          id: `NTF${Date.now()}-${ad.id}`,
-          adSpaceId: ad.id,
-          location: ad.location,
-          type: '到期下架',
-          message: `广告位 ${ad.location}（${ad.type}）租期已到期，已自动下架`,
-          notifyTime: now,
-          target: '招商部',
-          status: '已发送',
-        })
+        if (!existingNotifAdIds.has(ad.id)) {
+          addNotification({
+            id: `NTF${Date.now()}-${ad.id}`,
+            adSpaceId: ad.id,
+            location: ad.location,
+            type: '到期下架',
+            message: `广告位 ${ad.location}（${ad.type}）租期已到期，已自动下架`,
+            notifyTime: now,
+            target: '招商部',
+            status: '已发送',
+          })
+        }
       }
     })
-  }, [adSpaces, expiredAdIds, updateAdSpace, addNotification])
+  }, [adSpaces, expiredAdIds, updateAdSpace, addNotification, notifications])
 
   const filtered = useMemo(() => {
     return adSpaces.filter((a) => {
@@ -192,17 +196,20 @@ export default function Advertising() {
     today.setHours(0, 0, 0, 0)
     if (leaseEnd && new Date(leaseEnd).getTime() < today.getTime() && client) {
       updateAdSpace(adId, { status: '空置' })
-      const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
-      addNotification({
-        id: `NTF${Date.now()}-${adId}`,
-        adSpaceId: adId,
-        location,
-        type: '到期下架',
-        message: `广告位 ${location}（${type}）租期已到期，已自动下架`,
-        notifyTime: now,
-        target: '招商部',
-        status: '已发送',
-      })
+      const hasExistingNotif = notifications.some((n) => n.adSpaceId === adId && n.type === '到期下架')
+      if (!hasExistingNotif) {
+        const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+        addNotification({
+          id: `NTF${Date.now()}-${adId}`,
+          adSpaceId: adId,
+          location,
+          type: '到期下架',
+          message: `广告位 ${location}（${type}）租期已到期，已自动下架`,
+          notifyTime: now,
+          target: '招商部',
+          status: '已发送',
+        })
+      }
     }
   }
 
@@ -283,15 +290,15 @@ export default function Advertising() {
           <Plus size={16} />新增广告位
         </button>
         {notifications.length > 0 && (
-          <div className="relative flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
+          <button onClick={() => setNotifPanelOpen(true)} className="relative flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60 transition-colors hover:bg-white/10">
             <Bell size={14} className="text-amber-400" />
             <span>{notifications.length} 条通知</span>
-            {notifications.filter((n) => n.type === '到期下架').length > 0 && (
+            {notifications.filter((n) => n.status === '已发送').length > 0 && (
               <span className="rounded-full bg-red-500/20 px-1.5 py-0.5 text-[10px] text-red-400">
-                {notifications.filter((n) => n.type === '到期下架').length} 已下架
+                {notifications.filter((n) => n.status === '已发送').length} 未读
               </span>
             )}
-          </div>
+          </button>
         )}
       </div>
 
@@ -457,14 +464,22 @@ export default function Advertising() {
           </div>
           {notifications.length > 0 && (
             <div className="mt-4 border-t border-white/8 pt-3">
-              <div className="mb-2 flex items-center gap-2">
-                <Bell size={14} className="text-white/50" />
-                <h4 className="text-xs font-medium text-white/60">通知记录</h4>
-                <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">{notifications.length}</span>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bell size={14} className="text-white/50" />
+                  <h4 className="text-xs font-medium text-white/60">通知记录</h4>
+                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">{notifications.length}</span>
+                  {notifications.filter((n) => n.status === '已发送').length > 0 && (
+                    <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-400">{notifications.filter((n) => n.status === '已发送').length} 未读</span>
+                  )}
+                </div>
+                {notifications.some((n) => n.status === '已发送') && (
+                  <button onClick={markAllNotificationsRead} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors">全部已读</button>
+                )}
               </div>
               <div className="max-h-48 overflow-y-auto space-y-1.5">
                 {notifications.slice(0, 20).map((n) => (
-                  <div key={n.id} className="flex items-start gap-2 rounded-lg bg-white/3 px-3 py-2">
+                  <div key={n.id} className={cn('flex items-start gap-2 rounded-lg px-3 py-2', n.status === '已发送' ? 'bg-white/5' : 'bg-white/3')}>
                     <span className={cn(
                       'mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium border',
                       n.type === '到期下架' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
@@ -477,6 +492,9 @@ export default function Advertising() {
                       <p className="text-xs text-white/70 truncate">{n.message}</p>
                       <p className="text-[10px] text-white/30">{n.notifyTime} → {n.target} | {n.status}</p>
                     </div>
+                    {n.status === '已发送' && (
+                      <button onClick={() => markNotificationRead(n.id)} className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-amber-400 transition-colors hover:bg-amber-500/10">已读</button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -487,14 +505,22 @@ export default function Advertising() {
 
       {!expiryAds.length && notifications.length > 0 && (
         <div className="card-dark p-4">
-          <div className="mb-2 flex items-center gap-2">
-            <Bell size={14} className="text-white/50" />
-            <h4 className="text-xs font-medium text-white/60">通知记录</h4>
-            <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">{notifications.length}</span>
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell size={14} className="text-white/50" />
+              <h4 className="text-xs font-medium text-white/60">通知记录</h4>
+              <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">{notifications.length}</span>
+              {notifications.filter((n) => n.status === '已发送').length > 0 && (
+                <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-400">{notifications.filter((n) => n.status === '已发送').length} 未读</span>
+              )}
+            </div>
+            {notifications.some((n) => n.status === '已发送') && (
+              <button onClick={markAllNotificationsRead} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors">全部已读</button>
+            )}
           </div>
           <div className="max-h-48 overflow-y-auto space-y-1.5">
             {notifications.slice(0, 20).map((n) => (
-              <div key={n.id} className="flex items-start gap-2 rounded-lg bg-white/3 px-3 py-2">
+              <div key={n.id} className={cn('flex items-start gap-2 rounded-lg px-3 py-2', n.status === '已发送' ? 'bg-white/5' : 'bg-white/3')}>
                 <span className={cn(
                   'mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium border',
                   n.type === '到期下架' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
@@ -507,8 +533,61 @@ export default function Advertising() {
                   <p className="text-xs text-white/70 truncate">{n.message}</p>
                   <p className="text-[10px] text-white/30">{n.notifyTime} → {n.target} | {n.status}</p>
                 </div>
+                {n.status === '已发送' && (
+                  <button onClick={() => markNotificationRead(n.id)} className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-amber-400 transition-colors hover:bg-amber-500/10">已读</button>
+                )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {notifPanelOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setNotifPanelOpen(false)} />
+          <div className="relative w-full max-w-2xl animate-fade-in rounded-xl border border-white/8 bg-dark-800 p-6 shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Bell size={18} className="text-amber-400" />
+                招商部通知清单
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-400">{notifications.length}</span>
+              </h3>
+              <div className="flex items-center gap-3">
+                {notifications.some((n) => n.status === '已发送') && (
+                  <button onClick={markAllNotificationsRead} className="text-xs text-amber-400 transition-colors hover:text-amber-300">全部标记已读</button>
+                )}
+                <button onClick={() => setNotifPanelOpen(false)} className="text-white/40 transition-colors hover:text-white"><X size={20} /></button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {notifications.map((n) => (
+                <div key={n.id} className={cn('flex items-start gap-3 rounded-lg border p-3', n.status === '已发送' ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/3')}>
+                  <span className={cn(
+                    'mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                    n.type === '到期下架' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
+                    n.type === '到期提醒' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
+                    'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  )}>
+                    {n.type}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-white/80">{n.message}</p>
+                    <p className="text-xs text-white/40 mt-1">{n.notifyTime} → {n.target}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {n.status === '已发送' && (
+                      <button onClick={() => markNotificationRead(n.id)} className="rounded-lg border border-amber-500/30 px-2.5 py-1 text-xs text-amber-400 transition-colors hover:bg-amber-500/10">标记已读</button>
+                    )}
+                    {n.status === '已读' && (
+                      <span className="text-xs text-white/30">已读</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {notifications.length === 0 && (
+                <div className="py-8 text-center text-white/30">暂无通知</div>
+              )}
+            </div>
           </div>
         </div>
       )}

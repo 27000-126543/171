@@ -3,7 +3,7 @@ import {
   Search, Plus, Edit3, FileText, X, AlertTriangle,
   Check, PhoneCall, Save, ChevronDown, Building2,
   AlertCircle, Wallet, TrendingUp, CircleDot,
-  RefreshCw, LogOut,
+  RefreshCw, LogOut, FileSpreadsheet,
 } from 'lucide-react'
 import { useShopStore } from '@/stores/shopStore'
 import { cn } from '@/lib/utils'
@@ -57,7 +57,7 @@ interface RenewFormData {
 }
 
 export default function Shops() {
-  const { shops, bills, collectionRecords, addShop, updateShop, updateBill, addCollectionRecord, generateBillsForShop, deleteBillsByShopId, renewShop, terminateShop } = useShopStore()
+  const { shops, bills, contracts, collectionRecords, settlementRecords, addShop, updateShop, updateBill, addCollectionRecord, generateBillsForShop, deleteBillsByShopId, renewShop, terminateShop } = useShopStore()
 
   const [floorFilter, setFloorFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -79,6 +79,7 @@ export default function Shops() {
   const [renewForm, setRenewForm] = useState<RenewFormData>({ leaseStart: '', leaseEnd: '', rentPrice: '' })
 
   const [terminateDialog, setTerminateDialog] = useState<{ open: boolean; shopId: string }>({ open: false, shopId: '' })
+  const [settlementModal, setSettlementModal] = useState<{ open: boolean; shopId: string }>({ open: false, shopId: '' })
 
   const filtered = useMemo(() => {
     return shops.filter((s) => {
@@ -100,6 +101,19 @@ export default function Shops() {
     const totalRent = shops.reduce((sum, s) => sum + s.area * s.rentPrice, 0)
     return { rented, vacant, expiring, totalRent }
   }, [shops])
+
+  const financeStats = useMemo(() => {
+    const totalReceivable = bills.reduce((s, b) => s + b.amount, 0)
+    const totalReceived = bills.filter((b) => b.status === '已缴').reduce((s, b) => s + b.paidAmount, 0)
+    const totalOverdue = bills.filter((b) => b.status === '逾期').reduce((s, b) => s + b.amount, 0)
+    const totalDeposit = contracts.reduce((s, c) => s + (c.status === '生效中' ? c.deposit : 0), 0)
+    return { totalReceivable, totalReceived, totalOverdue, totalDeposit }
+  }, [bills, contracts])
+
+  const shopSettlements = useMemo(() => {
+    if (!settlementModal.open) return []
+    return settlementRecords.filter((r) => r.shopId === settlementModal.shopId)
+  }, [settlementRecords, settlementModal])
 
   const shopBills = useMemo(() => {
     if (!billsShop) return []
@@ -310,6 +324,25 @@ export default function Shops() {
         ))}
       </div>
 
+      <div className="grid grid-cols-4 gap-4">
+        {[
+          { label: '应收总额', value: `¥${financeStats.totalReceivable.toLocaleString()}`, icon: TrendingUp, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+          { label: '已收总额', value: `¥${financeStats.totalReceived.toLocaleString()}`, icon: Check, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+          { label: '逾期总额', value: `¥${financeStats.totalOverdue.toLocaleString()}`, icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-500/10' },
+          { label: '保证金总额', value: `¥${financeStats.totalDeposit.toLocaleString()}`, icon: Wallet, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+        ].map((card) => (
+          <div key={card.label} className="card-dark flex items-center gap-3 p-4">
+            <div className={cn('flex h-10 w-10 items-center justify-center rounded-lg', card.bg)}>
+              <card.icon size={20} className={card.color} />
+            </div>
+            <div>
+              <p className="text-xs text-white/40">{card.label}</p>
+              <p className={cn('text-lg font-semibold', card.color)}>{card.value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="card-dark overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1000px] text-sm">
@@ -359,6 +392,11 @@ export default function Shops() {
                       {shop.tenantName && (
                         <button onClick={() => openTerminateDialog(shop.id)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-red-400 transition-colors hover:bg-red-500/10">
                           <LogOut size={13} />退租
+                        </button>
+                      )}
+                      {settlementRecords.some((r) => r.shopId === shop.id) && (
+                        <button onClick={() => setSettlementModal({ open: true, shopId: shop.id })} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-cyan-400 transition-colors hover:bg-cyan-500/10">
+                          <FileSpreadsheet size={13} />结算
                         </button>
                       )}
                     </div>
@@ -574,34 +612,101 @@ export default function Shops() {
       {terminateDialog.open && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setTerminateDialog({ open: false, shopId: '' })} />
-          <div className="relative w-full max-w-sm animate-fade-in rounded-xl border border-white/8 bg-dark-800 p-6 shadow-2xl">
+          <div className="relative w-full max-w-lg animate-fade-in rounded-xl border border-white/8 bg-dark-800 p-6 shadow-2xl">
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/15">
                 <LogOut size={20} className="text-red-400" />
               </div>
               <div>
                 <p className="font-medium text-white">确认退租</p>
-                <p className="text-sm text-white/50">将结清未缴账单并释放商铺</p>
+                <p className="text-sm text-white/50">将结清未缴账单、计算结算明细并释放商铺</p>
               </div>
             </div>
             {(() => {
+              const shop = shops.find((s) => s.id === terminateDialog.shopId)
               const unpaid = bills.filter((b) => b.shopId === terminateDialog.shopId && b.status !== '已缴')
               const totalUnpaid = unpaid.reduce((s, b) => s + b.amount, 0)
-              return unpaid.length > 0 ? (
-                <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2">
-                  <p className="text-xs text-red-400 mb-1">待结清账单: {unpaid.length}笔</p>
-                  <p className="text-sm font-mono text-red-400">合计 ¥{totalUnpaid.toLocaleString()}</p>
-                  <p className="text-[10px] text-white/30 mt-1">退租后将自动标记为已缴</p>
-                </div>
-              ) : (
-                <div className="mb-4 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
-                  <p className="text-xs text-emerald-400">所有账单已结清</p>
+              const contract = contracts.find((c) => c.shopId === terminateDialog.shopId)
+              const deposit = contract?.deposit || (shop ? shop.area * shop.rentPrice * 2 : 0)
+              const depositDeduction = Math.min(deposit, totalUnpaid)
+              const finalAmount = Math.abs(deposit - totalUnpaid)
+              const direction = deposit >= totalUnpaid ? '应退' : '应补'
+              return (
+                <div className="mb-4 space-y-3">
+                  {unpaid.length > 0 && (
+                    <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2">
+                      <p className="text-xs text-red-400 mb-1">待结清账单: {unpaid.length}笔</p>
+                      <p className="text-sm font-mono text-red-400">补缴租金合计 ¥{totalUnpaid.toLocaleString()}</p>
+                    </div>
+                  )}
+                  <div className="rounded-lg border border-white/10 bg-white/3 p-3 space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-white/50">保证金</span><span className="text-white/80 font-mono">¥{deposit.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-white/50">补缴租金</span><span className="text-red-400 font-mono">- ¥{totalUnpaid.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-white/50">保证金抵扣</span><span className="text-amber-400 font-mono">¥{depositDeduction.toLocaleString()}</span></div>
+                    <div className="border-t border-white/10 pt-2 flex justify-between">
+                      <span className="text-white/70 font-medium">{direction}金额</span>
+                      <span className={cn('font-mono font-bold text-base', direction === '应退' ? 'text-emerald-400' : 'text-red-400')}>
+                        {direction === '应退' ? '+' : '-'} ¥{finalAmount.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-white/30">退租后将自动生成结算单并标记未缴账单为已缴</p>
                 </div>
               )
             })()}
             <div className="flex items-center gap-3">
               <button onClick={handleTerminate} className="flex-1 rounded-lg bg-red-500/80 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500">确认退租</button>
               <button onClick={() => setTerminateDialog({ open: false, shopId: '' })} className="flex-1 rounded-lg border border-white/10 py-2 text-sm text-white/60 transition-colors hover:bg-white/5">取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settlementModal.open && shopSettlements.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setSettlementModal({ open: false, shopId: '' })} />
+          <div className="relative w-full max-w-2xl animate-fade-in rounded-xl border border-white/8 bg-dark-800 p-6 shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <FileSpreadsheet size={18} className="text-cyan-400" />
+                退租结算记录
+              </h3>
+              <button onClick={() => setSettlementModal({ open: false, shopId: '' })} className="text-white/40 transition-colors hover:text-white"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              {shopSettlements.map((stl) => (
+                <div key={stl.id} className="rounded-lg border border-white/10 bg-white/3 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <span className="text-sm font-medium text-white">{stl.shopNumber} - {stl.tenantName}</span>
+                      <span className="ml-2 text-xs text-white/40">{stl.settledAt}</span>
+                    </div>
+                    <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', stl.direction === '应退' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/15 text-red-400 border border-red-500/30')}>
+                      {stl.direction} ¥{stl.finalAmount.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 mb-3 text-sm">
+                    <div className="rounded-lg bg-white/3 p-2.5">
+                      <p className="text-[10px] text-white/40">补缴租金</p>
+                      <p className="font-mono text-red-400">¥{stl.unpaidRent.toLocaleString()}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/3 p-2.5">
+                      <p className="text-[10px] text-white/40">保证金</p>
+                      <p className="font-mono text-purple-400">¥{stl.deposit.toLocaleString()}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/3 p-2.5">
+                      <p className="text-[10px] text-white/40">保证金抵扣</p>
+                      <p className="font-mono text-amber-400">¥{stl.depositDeduction.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-white/30">
+                    <span className="text-white/50">账单明细:</span> {stl.bills.length}笔
+                    {stl.bills.filter((b) => b.status !== '已缴').length > 0 && (
+                      <span className="ml-1 text-red-400/60">({stl.bills.filter((b) => b.status !== '已缴').length}笔未缴)</span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

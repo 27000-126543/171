@@ -43,7 +43,7 @@ const ALERT_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
 export default function Dashboard() {
   const navigate = useNavigate()
   const { bills, shops: storeShops } = useShopStore()
-  const { parkingSpots } = useParkingStore()
+  const { parkingSpots, reminders } = useParkingStore()
   const { incidents } = useSecurityStore()
   const { tasks: cleaningTasks } = useCleaningStore()
   const { adSpaces } = useAdvertisingStore()
@@ -55,12 +55,14 @@ export default function Dashboard() {
 
   const overtimeVehicles = useMemo(() => {
     const now = Date.now()
+    const remindedSpotIds = new Set(reminders.map((r) => r.spotId))
     return parkingSpots.filter((s) => {
       if (s.status !== '占用' || !s.enterTime) return false
+      if (remindedSpotIds.has(s.id)) return false
       const hours = (now - new Date(s.enterTime).getTime()) / 3600000
       return hours > 4
     })
-  }, [parkingSpots])
+  }, [parkingSpots, reminders])
 
   const expiredAds = useMemo(() => {
     const today = new Date()
@@ -82,7 +84,7 @@ export default function Dashboard() {
       color: 'text-red-400',
       bg: 'bg-red-500/10',
       border: 'border-red-500/20',
-      route: '/shops',
+      route: '/disposal?type=逾期账单',
       details: overdueBills.slice(0, 3).map((b) => {
         const shop = storeShops.find((s) => s.id === b.shopId)
         return `${shop?.number || b.shopId} ¥${b.amount.toLocaleString()}`
@@ -96,7 +98,7 @@ export default function Dashboard() {
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
       border: 'border-amber-500/20',
-      route: '/parking',
+      route: '/disposal?type=超时车辆',
       details: overtimeVehicles.slice(0, 3).map((s) => `${s.vehiclePlate} (${s.floor})`),
     },
     {
@@ -107,7 +109,7 @@ export default function Dashboard() {
       color: 'text-orange-400',
       bg: 'bg-orange-500/10',
       border: 'border-orange-500/20',
-      route: '/advertising',
+      route: '/disposal?type=过期广告',
       details: expiredAds.slice(0, 3).map((a) => `${a.location} (${a.type})`),
     },
     {
@@ -118,7 +120,7 @@ export default function Dashboard() {
       color: 'text-purple-400',
       bg: 'bg-purple-500/10',
       border: 'border-purple-500/20',
-      route: '/cleaning',
+      route: '/disposal?type=超时清洁',
       details: overdueCleaning.slice(0, 3).map((t) => `${t.area} (${t.floor})`),
     },
     {
@@ -129,7 +131,7 @@ export default function Dashboard() {
       color: 'text-red-500',
       bg: 'bg-red-500/10',
       border: 'border-red-500/20',
-      route: '/security',
+      route: '/disposal?type=安保事件',
       details: pendingIncidents.slice(0, 3).map((e) => `${e.type} ${e.location}`),
     },
   ], [overdueBills, overtimeVehicles, expiredAds, overdueCleaning, pendingIncidents, storeShops])

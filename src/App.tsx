@@ -9,6 +9,7 @@ import Cleaning from '@/pages/Cleaning'
 import Energy from '@/pages/Energy'
 import Advertising from '@/pages/Advertising'
 import Statistics from '@/pages/Statistics'
+import DisposalCenter from '@/pages/DisposalCenter'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/cleaning" element={<Cleaning />} />
           <Route path="/energy" element={<Energy />} />
           <Route path="/advertising" element={<Advertising />} />
+          <Route path="/disposal" element={<DisposalCenter />} />
           <Route path="/statistics" element={<Statistics />} />
         </Route>
       </Routes>

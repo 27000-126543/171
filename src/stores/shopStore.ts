@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Shop, Contract, Bill, CollectionRecord } from '@/types'
+import type { Shop, Contract, Bill, CollectionRecord, SettlementRecord } from '@/types'
 import { shops as mockShops, contracts as mockContracts, bills as mockBills, collectionRecords as mockCollectionRecords } from '@/mock/shops'
 
 interface ShopState {
@@ -7,6 +7,7 @@ interface ShopState {
   contracts: Contract[]
   bills: Bill[]
   collectionRecords: CollectionRecord[]
+  settlementRecords: SettlementRecord[]
   addShop: (shop: Shop) => void
   updateShop: (id: string, data: Partial<Shop>) => void
   deleteShop: (id: string) => void
@@ -30,6 +31,7 @@ export const useShopStore = create<ShopState>((set, get) => ({
   contracts: mockContracts,
   bills: mockBills,
   collectionRecords: mockCollectionRecords,
+  settlementRecords: [],
   addShop: (shop) => set((state) => ({ shops: [...state.shops, shop] })),
   updateShop: (id, data) => set((state) => ({
     shops: state.shops.map((s) => (s.id === id ? { ...s, ...data } : s)),
@@ -213,11 +215,32 @@ export const useShopStore = create<ShopState>((set, get) => ({
     }))
   },
   terminateShop: (shopId) => {
-    const { bills, shops } = get()
+    const { bills, shops, contracts } = get()
     const shop = shops.find((s) => s.id === shopId)
     if (!shop) return
 
-    const unpaidBills = bills.filter((b) => b.shopId === shopId && b.status !== '已缴')
+    const shopBills = bills.filter((b) => b.shopId === shopId)
+    const unpaidBills = shopBills.filter((b) => b.status !== '已缴')
+    const contract = contracts.find((c) => c.shopId === shopId)
+    const deposit = contract?.deposit || shop.area * shop.rentPrice * 2
+    const unpaidRent = unpaidBills.reduce((s, b) => s + b.amount, 0)
+    const depositDeduction = Math.min(deposit, unpaidRent)
+    const finalAmount = Math.abs(deposit - unpaidRent)
+    const direction: '应退' | '应补' = deposit >= unpaidRent ? '应退' : '应补'
+
+    const settlement: SettlementRecord = {
+      id: `STL${Date.now()}`,
+      shopId,
+      shopNumber: shop.number,
+      tenantName: shop.tenantName,
+      unpaidRent,
+      deposit,
+      depositDeduction,
+      finalAmount,
+      direction,
+      settledAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      bills: shopBills.map((b) => ({ billDate: b.billDate, amount: b.amount, status: b.status })),
+    }
 
     set((state) => ({
       shops: state.shops.map((s) => (s.id === shopId ? {
@@ -240,6 +263,7 @@ export const useShopStore = create<ShopState>((set, get) => ({
         ...c,
         status: '已终止' as const,
       } : c)),
+      settlementRecords: [...state.settlementRecords, settlement],
     }))
   },
 }))

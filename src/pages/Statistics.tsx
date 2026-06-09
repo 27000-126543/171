@@ -397,7 +397,9 @@ export default function Statistics() {
     )
     XLSX.utils.book_append_sheet(wb, complaintSheet, '投诉统计')
 
-    XLSX.writeFile(wb, `月度统计报表_${startDate}_${endDate}.xlsx`)
+    const exportFloor = activeFloor || '全部楼层'
+    const exportCategory = activeCategory || '全部业态'
+    XLSX.writeFile(wb, `月度统计报表_${exportFloor}_${exportCategory}_${activeStartDate || startDate}_${activeEndDate || endDate}.xlsx`)
   }
 
   return (

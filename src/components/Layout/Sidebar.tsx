@@ -14,6 +14,7 @@ import {
   ChevronRight,
   User,
   LogOut,
+  ClipboardCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -26,6 +27,7 @@ const navItems = [
   { path: '/cleaning', label: '保洁排班', icon: SprayCan },
   { path: '/energy', label: '能耗监控', icon: Zap },
   { path: '/advertising', label: '广告位', icon: Megaphone },
+  { path: '/disposal', label: '处置中心', icon: ClipboardCheck },
   { path: '/statistics', label: '统计报表', icon: BarChart3 },
 ]
 

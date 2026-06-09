@@ -191,3 +191,30 @@ export interface FootTrafficData {
   date: string
   hour: number
 }
+
+export interface WorkOrder {
+  id: string
+  type: '逾期账单' | '超时车辆' | '过期广告' | '超时清洁' | '安保事件'
+  sourceId: string
+  title: string
+  description: string
+  status: '待处理' | '处理中' | '已处理'
+  createdAt: string
+  handler: string
+  handledAt: string
+  result: string
+}
+
+export interface SettlementRecord {
+  id: string
+  shopId: string
+  shopNumber: string
+  tenantName: string
+  unpaidRent: number
+  deposit: number
+  depositDeduction: number
+  finalAmount: number
+  direction: '应退' | '应补'
+  settledAt: string
+  bills: Array<{ billDate: string; amount: number; status: string }>
+}
